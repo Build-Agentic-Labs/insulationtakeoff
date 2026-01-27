@@ -24,10 +24,10 @@ interface Project {
   status: string;
   created_at: string;
   client_id: string | null;
-  client?: {
+  client: {
     id: string;
     name: string;
-  };
+  } | null;
 }
 
 export default function ProjectsPage() {

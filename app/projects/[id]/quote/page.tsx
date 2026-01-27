@@ -9,7 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatCurrency, formatSqft } from '@/lib/calculations/pricing';
-import { FileText, Download, Loader2, AlertCircle, Settings, Plus, Trash2 } from 'lucide-react';
+import { FileText, Download, Loader2, AlertCircle, Settings, Plus, Trash2, Check } from 'lucide-react';
+
+// ─── Interfaces ─────────────────────────────────────────────
 
 interface Room {
   id: string;
@@ -18,6 +20,17 @@ interface Room {
   area_sqft: number | null;
   perimeter_ft: number | null;
   height_ft: number | null;
+}
+
+interface InsulationProduct {
+  id: string;
+  name: string;
+  type: 'batt' | 'blown_in';
+  rValue: number;
+  pricePerSqft: number;
+  thickness: string;
+  description: string;
+  applicableAreas: string[];
 }
 
 interface InsulationArea {
@@ -29,7 +42,95 @@ interface InsulationArea {
   sqft: number;
   pricePerSqft: number;
   isCustom?: boolean;
+  selectedProductId?: string | null;
 }
+
+// ─── Product Catalog ────────────────────────────────────────
+
+const INSULATION_CATALOG: InsulationProduct[] = [
+  // Batt products
+  {
+    id: 'batt-r13',
+    name: 'R-13 Batt',
+    type: 'batt',
+    rValue: 13,
+    pricePerSqft: 0.90,
+    thickness: '3.5"',
+    description: 'Fiberglass batt for 2×4 walls',
+    applicableAreas: ['exterior_walls', 'garage_walls'],
+  },
+  {
+    id: 'batt-r15',
+    name: 'R-15 Batt',
+    type: 'batt',
+    rValue: 15,
+    pricePerSqft: 1.10,
+    thickness: '3.5"',
+    description: 'Mineral wool batt for 2×4 walls',
+    applicableAreas: ['exterior_walls', 'garage_walls'],
+  },
+  {
+    id: 'batt-r19',
+    name: 'R-19 Batt',
+    type: 'batt',
+    rValue: 19,
+    pricePerSqft: 1.30,
+    thickness: '6.25"',
+    description: 'Fiberglass batt for 2×6 walls & floors',
+    applicableAreas: ['exterior_walls', 'garage_walls', 'crawlspace_floor'],
+  },
+  {
+    id: 'batt-r21',
+    name: 'R-21 Batt',
+    type: 'batt',
+    rValue: 21,
+    pricePerSqft: 1.50,
+    thickness: '5.5"',
+    description: 'High-density batt for 2×6 walls',
+    applicableAreas: ['exterior_walls', 'garage_walls'],
+  },
+  // Blown-in products
+  {
+    id: 'blown-r30',
+    name: 'R-30 Blown-In',
+    type: 'blown_in',
+    rValue: 30,
+    pricePerSqft: 1.25,
+    thickness: '10–11"',
+    description: 'Blown fiberglass/cellulose for attics',
+    applicableAreas: ['attic_ceiling', 'crawlspace_floor'],
+  },
+  {
+    id: 'blown-r38',
+    name: 'R-38 Blown-In',
+    type: 'blown_in',
+    rValue: 38,
+    pricePerSqft: 1.50,
+    thickness: '13–14"',
+    description: 'Blown fiberglass/cellulose for attics',
+    applicableAreas: ['attic_ceiling'],
+  },
+  {
+    id: 'blown-r49',
+    name: 'R-49 Blown-In',
+    type: 'blown_in',
+    rValue: 49,
+    pricePerSqft: 1.85,
+    thickness: '17–18"',
+    description: 'Blown insulation for cold climate attics',
+    applicableAreas: ['attic_ceiling'],
+  },
+  {
+    id: 'blown-r60',
+    name: 'R-60 Blown-In',
+    type: 'blown_in',
+    rValue: 60,
+    pricePerSqft: 2.20,
+    thickness: '20–22"',
+    description: 'Maximum attic coverage',
+    applicableAreas: ['attic_ceiling'],
+  },
+];
 
 interface GlobalPricing {
   wall_per_sqft: number;
@@ -90,7 +191,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
         .eq('key', 'pricing')
         .single();
 
-      const pricing = pricingData?.value || DEFAULT_PRICING;
+      const pricing = (pricingData?.value || DEFAULT_PRICING) as GlobalPricing;
       setGlobalPricing(pricing);
 
       // Calculate available areas based on extracted data
@@ -252,11 +353,19 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       const updatedAreas = prev.map(area => {
         const savedItem = lineItems.find((item: any) => item.id === area.id);
         if (savedItem) {
+          // Try to match a product by R-value and price
+          const matchedProduct = INSULATION_CATALOG.find(
+            p => p.applicableAreas.includes(area.id) &&
+                 p.rValue === savedItem.rValue &&
+                 p.pricePerSqft === savedItem.pricePerSqft
+          );
           return {
             ...area,
             enabled: true,
             rValue: savedItem.rValue,
             sqft: savedItem.sqft || area.sqft,
+            pricePerSqft: savedItem.pricePerSqft ?? area.pricePerSqft,
+            selectedProductId: savedItem.selectedProductId || matchedProduct?.id || null,
           };
         }
         return area;
@@ -320,6 +429,27 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
         area.id === areaId ? { ...area, pricePerSqft: numValue } : area
       )
     );
+  };
+
+  const selectProduct = (areaId: string, productId: string) => {
+    const product = INSULATION_CATALOG.find(p => p.id === productId);
+    if (!product) return;
+    setInsulationAreas(prev =>
+      prev.map(area =>
+        area.id === areaId
+          ? {
+              ...area,
+              selectedProductId: area.selectedProductId === productId ? null : productId,
+              rValue: area.selectedProductId === productId ? null : product.rValue,
+              pricePerSqft: area.selectedProductId === productId ? area.pricePerSqft : product.pricePerSqft,
+            }
+          : area
+      )
+    );
+  };
+
+  const getApplicableProducts = (areaId: string): InsulationProduct[] => {
+    return INSULATION_CATALOG.filter(p => p.applicableAreas.includes(areaId));
   };
 
   const addCustomLineItem = () => {
@@ -392,6 +522,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
         pricePerSqft: area.pricePerSqft,
         totalCost: area.sqft * area.pricePerSqft,
         isCustom: area.isCustom || false,
+        selectedProductId: area.selectedProductId || null,
       }));
 
       const { totalCost } = calculateTotal();
@@ -497,49 +628,101 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                           </div>
 
                           {area.enabled && (
-                            <div className="grid grid-cols-3 gap-3 pt-2">
-                              <div>
-                                <Label htmlFor={`${area.id}-rvalue`} className="text-sm">
-                                  R-Value
-                                </Label>
-                                <Input
-                                  id={`${area.id}-rvalue`}
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  placeholder="e.g., 38"
-                                  value={area.rValue ?? ''}
-                                  onChange={(e) => updateRValue(area.id, e.target.value)}
-                                  className="mt-1"
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor={`${area.id}-sqft`} className="text-sm">
-                                  Square Feet
-                                </Label>
-                                <Input
-                                  id={`${area.id}-sqft`}
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  value={area.sqft}
-                                  onChange={(e) => updateSqft(area.id, e.target.value)}
-                                  className="mt-1"
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor={`${area.id}-price`} className="text-sm">
-                                  $/Sq Ft
-                                </Label>
-                                <Input
-                                  id={`${area.id}-price`}
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={area.pricePerSqft}
-                                  onChange={(e) => updatePricePerSqft(area.id, e.target.value)}
-                                  className="mt-1"
-                                />
+                            <div className="space-y-3 pt-2">
+                              {/* Product Card Picker */}
+                              {getApplicableProducts(area.id).length > 0 && (
+                                <div>
+                                  <Label className="text-sm text-muted-foreground mb-2 block">
+                                    Select Product
+                                  </Label>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {getApplicableProducts(area.id).map((product) => {
+                                      const isSelected = area.selectedProductId === product.id;
+                                      return (
+                                        <button
+                                          key={product.id}
+                                          onClick={() => selectProduct(area.id, product.id)}
+                                          className={`relative text-left rounded-lg border-2 p-3 transition-all duration-150 ${
+                                            isSelected
+                                              ? 'border-primary bg-primary/5 dark:bg-primary/10 shadow-sm'
+                                              : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
+                                          }`}
+                                        >
+                                          {isSelected && (
+                                            <div className="absolute top-2 right-2">
+                                              <Check className="h-4 w-4 text-primary" />
+                                            </div>
+                                          )}
+                                          <div className="flex items-baseline gap-2">
+                                            <span className="text-lg font-bold text-zinc-900 dark:text-white">
+                                              R-{product.rValue}
+                                            </span>
+                                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
+                                              product.type === 'batt'
+                                                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                                                : 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'
+                                            }`}>
+                                              {product.type === 'batt' ? 'Batt' : 'Blown-In'}
+                                            </span>
+                                          </div>
+                                          <p className="text-xs text-muted-foreground mt-1">
+                                            {product.thickness} — {product.description}
+                                          </p>
+                                          <p className="text-sm font-semibold mt-1.5 text-zinc-700 dark:text-zinc-300">
+                                            ${product.pricePerSqft.toFixed(2)}/sf
+                                          </p>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* R-Value / SqFt / Price override inputs */}
+                              <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                  <Label htmlFor={`${area.id}-rvalue`} className="text-sm">
+                                    R-Value
+                                  </Label>
+                                  <Input
+                                    id={`${area.id}-rvalue`}
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    placeholder="e.g., 38"
+                                    value={area.rValue ?? ''}
+                                    onChange={(e) => updateRValue(area.id, e.target.value)}
+                                    className="mt-1"
+                                  />
+                                </div>
+                                <div>
+                                  <Label htmlFor={`${area.id}-sqft`} className="text-sm">
+                                    Square Feet
+                                  </Label>
+                                  <Input
+                                    id={`${area.id}-sqft`}
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={area.sqft}
+                                    onChange={(e) => updateSqft(area.id, e.target.value)}
+                                    className="mt-1"
+                                  />
+                                </div>
+                                <div>
+                                  <Label htmlFor={`${area.id}-price`} className="text-sm">
+                                    $/Sq Ft
+                                  </Label>
+                                  <Input
+                                    id={`${area.id}-price`}
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={area.pricePerSqft}
+                                    onChange={(e) => updatePricePerSqft(area.id, e.target.value)}
+                                    className="mt-1"
+                                  />
+                                </div>
                               </div>
                             </div>
                           )}
@@ -718,6 +901,11 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                                       <span className="text-xs text-muted-foreground ml-1">
                                         R-{area.rValue}
                                       </span>
+                                    )}
+                                    {area.selectedProductId && (
+                                      <div className="text-[11px] text-muted-foreground">
+                                        {INSULATION_CATALOG.find(p => p.id === area.selectedProductId)?.name}
+                                      </div>
                                     )}
                                   </div>
                                 </td>

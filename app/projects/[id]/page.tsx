@@ -31,13 +31,13 @@ interface Project {
   id: string;
   name: string;
   status: string;
-  pdf_url: string;
+  pdf_url: string | null;
   created_at: string;
   client_id: string | null;
-  client?: {
+  client: {
     id: string;
     name: string;
-  };
+  } | null;
 }
 
 interface Document {

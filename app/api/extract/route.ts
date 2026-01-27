@@ -1,46 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { analyzePDF } from '@/lib/ai/claude-client';
-import { parseFloorPlanResponse, validateFloorPlanData } from '@/lib/ai/parsers';
-
-const EXTRACTION_PROMPT = `You are analyzing architectural floor plans to extract insulation-related measurements.
-
-Analyze this PDF document and extract ALL measurements relevant for insulation quoting:
-
-1. **Total Living Area** - Look for labels like "TOTAL LIVING AREA", "LIVING AREA", "HEATED AREA", or similar. This is typically shown in square feet.
-
-2. **Garage Area** - Look for garage square footage, often labeled separately.
-
-3. **Individual Rooms** - Extract dimensions (length x width) or area for each labeled room.
-
-4. **Wall Heights** - Look for section views that show wall heights (floor to ceiling).
-
-5. **Building Perimeter** - If shown, extract the total perimeter length.
-
-Return your response as a JSON object with this EXACT structure:
-{
-  "living_area_sqft": <number or null>,
-  "garage_area_sqft": <number or null>,
-  "wall_height_ft": <number or null>,
-  "perimeter_ft": <number or null>,
-  "rooms": [
-    {
-      "name": "<room name>",
-      "type": "living" | "garage" | "attic" | "crawlspace",
-      "area_sqft": <number or null>,
-      "length_ft": <number or null>,
-      "width_ft": <number or null>
-    }
-  ],
-  "confidence": <number between 0 and 1>
-}
-
-IMPORTANT:
-- Only include values you can clearly see in the document
-- Use null for any values not found
-- For the sample PDF provided, look specifically for the "TOTAL LIVING AREA" and "GARAGE" labels
-- The confidence should reflect how certain you are about the extracted data
-- Return ONLY the JSON object, no other text`;
+import { parseInsulationExtractionResponse, InsulationExtractionData } from '@/lib/ai/parsers';
+import { INSULATION_EXTRACTION_PROMPT } from '@/lib/ai/prompts';
 
 export async function POST(request: NextRequest) {
   try {
@@ -67,6 +29,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!project.pdf_url) {
+      return NextResponse.json(
+        { error: 'Project has no PDF uploaded' },
+        { status: 400 }
+      );
+    }
+
     // Update project status
     await supabaseAdmin
       .from('projects')
@@ -83,15 +52,19 @@ export async function POST(request: NextRequest) {
 
     // Send PDF directly to Claude for analysis
     console.log('Sending PDF to Claude for analysis...');
-    const response = await analyzePDF(pdfBase64, EXTRACTION_PROMPT);
+    const response = await analyzePDF(pdfBase64, INSULATION_EXTRACTION_PROMPT);
 
     console.log('Claude response:', response);
 
     // Parse the response
-    const extractedData = parseFloorPlanResponse(response);
+    const extractedData = parseInsulationExtractionResponse(response);
 
     if (!extractedData) {
       console.error('Failed to parse Claude response');
+      await supabaseAdmin
+        .from('projects')
+        .update({ status: 'uploaded' })
+        .eq('id', projectId);
       return NextResponse.json(
         { error: 'Failed to parse extraction results' },
         { status: 500 }
@@ -122,56 +95,37 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function storeExtractedData(projectId: string, data: any) {
+async function storeExtractedData(projectId: string, data: InsulationExtractionData) {
+  // Clean up existing data for re-extraction
+  await supabaseAdmin.from('openings').delete().eq('project_id', projectId);
+  await supabaseAdmin.from('rooms').delete().eq('project_id', projectId);
+
+  // Determine wall composition and stud size from first wall section
+  const wallComposition = data.wall_sections?.[0]?.composition || null;
+  const studSize = data.wall_sections?.[0]?.stud_size || null;
+
   // Create main living area room if present
-  if (data.living_area_sqft) {
-    const { data: room } = await supabaseAdmin
+  if (data.total_living_area_sqft) {
+    await supabaseAdmin
       .from('rooms')
       .insert({
         project_id: projectId,
         name: 'Main Living Area',
         type: 'living',
-        area_sqft: data.living_area_sqft,
+        area_sqft: data.total_living_area_sqft,
         height_ft: data.wall_height_ft,
-        perimeter_ft: data.perimeter_ft,
-      })
-      .select()
-      .single();
-
-    if (room) {
-      await supabaseAdmin.from('measurements').insert({
-        room_id: room.id,
-        field: 'area_sqft',
-        extracted_value: data.living_area_sqft,
-        source_page: 1,
-        confidence: data.confidence,
+        perimeter_ft: data.exterior_wall_length_ft,
+        wall_sf: data.gross_wall_sf,
+        floor_sf: data.floor_sf,
+        ceiling_sf: data.ceiling_sf,
+        wall_composition: wallComposition,
+        stud_size: studSize,
       });
-
-      if (data.wall_height_ft) {
-        await supabaseAdmin.from('measurements').insert({
-          room_id: room.id,
-          field: 'height_ft',
-          extracted_value: data.wall_height_ft,
-          source_page: 1,
-          confidence: data.confidence,
-        });
-      }
-
-      if (data.perimeter_ft) {
-        await supabaseAdmin.from('measurements').insert({
-          room_id: room.id,
-          field: 'perimeter_ft',
-          extracted_value: data.perimeter_ft,
-          source_page: 1,
-          confidence: data.confidence,
-        });
-      }
-    }
   }
 
   // Create garage room if present
   if (data.garage_area_sqft) {
-    const { data: room } = await supabaseAdmin
+    await supabaseAdmin
       .from('rooms')
       .insert({
         project_id: projectId,
@@ -179,70 +133,69 @@ async function storeExtractedData(projectId: string, data: any) {
         type: 'garage',
         area_sqft: data.garage_area_sqft,
         height_ft: data.wall_height_ft,
-      })
-      .select()
-      .single();
-
-    if (room) {
-      await supabaseAdmin.from('measurements').insert({
-        room_id: room.id,
-        field: 'area_sqft',
-        extracted_value: data.garage_area_sqft,
-        source_page: 1,
-        confidence: data.confidence,
       });
-    }
   }
 
-  // Store individual rooms
+  // Store individual rooms (skip duplicates of main/garage)
   if (data.rooms && Array.isArray(data.rooms)) {
     for (const extractedRoom of data.rooms) {
       if (!extractedRoom.area_sqft && !extractedRoom.length_ft && !extractedRoom.width_ft) {
         continue;
       }
 
-      const { data: room } = await supabaseAdmin
+      // Skip if this is essentially the main living area or garage already stored
+      const nameLower = extractedRoom.name.toLowerCase();
+      if (
+        (nameLower.includes('total') && nameLower.includes('living')) ||
+        (nameLower === 'garage' && extractedRoom.type === 'garage')
+      ) {
+        continue;
+      }
+
+      await supabaseAdmin
         .from('rooms')
         .insert({
           project_id: projectId,
           name: extractedRoom.name,
           type: extractedRoom.type || 'living',
           area_sqft: extractedRoom.area_sqft,
-        })
-        .select()
-        .single();
+        });
+    }
+  }
 
-      if (room) {
-        if (extractedRoom.area_sqft) {
-          await supabaseAdmin.from('measurements').insert({
-            room_id: room.id,
-            field: 'area_sqft',
-            extracted_value: extractedRoom.area_sqft,
-            source_page: 1,
-            confidence: data.confidence,
-          });
-        }
+  // Store doors in openings table
+  if (data.doors && Array.isArray(data.doors)) {
+    for (const door of data.doors) {
+      await supabaseAdmin
+        .from('openings')
+        .insert({
+          project_id: projectId,
+          type: 'door',
+          label: door.label || 'Door',
+          width_ft: door.width_ft,
+          height_ft: door.height_ft,
+          area_sqft: door.area_sqft,
+          count: door.count || 1,
+          confidence: data.confidence,
+        });
+    }
+  }
 
-        if (extractedRoom.length_ft) {
-          await supabaseAdmin.from('measurements').insert({
-            room_id: room.id,
-            field: 'length_ft',
-            extracted_value: extractedRoom.length_ft,
-            source_page: 1,
-            confidence: data.confidence,
-          });
-        }
-
-        if (extractedRoom.width_ft) {
-          await supabaseAdmin.from('measurements').insert({
-            room_id: room.id,
-            field: 'width_ft',
-            extracted_value: extractedRoom.width_ft,
-            source_page: 1,
-            confidence: data.confidence,
-          });
-        }
-      }
+  // Store windows in openings table
+  if (data.windows && Array.isArray(data.windows)) {
+    for (const window of data.windows) {
+      await supabaseAdmin
+        .from('openings')
+        .insert({
+          project_id: projectId,
+          type: 'window',
+          label: window.label || 'Window',
+          width_ft: window.width_ft,
+          height_ft: window.height_ft,
+          area_sqft: window.area_sqft,
+          count: window.count || 1,
+          confidence: data.confidence,
+        });
     }
   }
 }

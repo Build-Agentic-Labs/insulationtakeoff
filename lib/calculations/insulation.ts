@@ -5,6 +5,15 @@ export interface Room {
   area_sqft: number | null;
   perimeter_ft: number | null;
   height_ft: number | null;
+  wall_sf: number | null;
+  floor_sf: number | null;
+  ceiling_sf: number | null;
+}
+
+export interface Opening {
+  type: 'door' | 'window';
+  area_sqft: number | null;
+  count: number;
 }
 
 export interface Settings {
@@ -31,14 +40,29 @@ export interface LineItem {
 }
 
 /**
- * Calculate wall area for a room (perimeter × height)
+ * Calculate wall area for a room (perimeter x height)
  */
 export function calculateWallArea(perimeter: number, height: number): number {
   return perimeter * height;
 }
 
 /**
- * Calculate total living area wall insulation
+ * Calculate net wall SF by subtracting openings from gross wall SF
+ */
+export function calculateNetWallSF(
+  grossWallSF: number,
+  openings: Opening[]
+): number {
+  const openingsSF = openings.reduce(
+    (sum, o) => sum + (o.area_sqft || 0) * (o.count || 1),
+    0
+  );
+  return Math.max(0, grossWallSF - openingsSF);
+}
+
+/**
+ * Calculate total living area wall insulation.
+ * Prefers wall_sf when available, falls back to perimeter * height.
  */
 export function calculateLivingWallInsulation(
   rooms: Room[],
@@ -53,7 +77,9 @@ export function calculateLivingWallInsulation(
   let totalWallArea = 0;
 
   for (const room of livingRooms) {
-    if (room.perimeter_ft && room.height_ft) {
+    if (room.wall_sf) {
+      totalWallArea += room.wall_sf;
+    } else if (room.perimeter_ft && room.height_ft) {
       totalWallArea += calculateWallArea(room.perimeter_ft, room.height_ft);
     }
   }
@@ -87,7 +113,9 @@ export function calculateGarageWallInsulation(
   let totalWallArea = 0;
 
   for (const room of garageRooms) {
-    if (room.perimeter_ft && room.height_ft) {
+    if (room.wall_sf) {
+      totalWallArea += room.wall_sf;
+    } else if (room.perimeter_ft && room.height_ft) {
       totalWallArea += calculateWallArea(room.perimeter_ft, room.height_ft);
     }
   }
@@ -106,7 +134,8 @@ export function calculateGarageWallInsulation(
 }
 
 /**
- * Calculate attic/ceiling insulation
+ * Calculate attic/ceiling insulation.
+ * Prefers ceiling_sf when available.
  */
 export function calculateAtticInsulation(
   rooms: Room[],
@@ -115,23 +144,28 @@ export function calculateAtticInsulation(
   const atticRooms = rooms.filter((r) => r.type === 'attic');
 
   if (atticRooms.length === 0) {
-    // If no attic room, use living area sqft as ceiling area
+    // Use ceiling_sf from living rooms if available, otherwise fall back to area_sqft
     const livingRooms = rooms.filter((r) => r.type === 'living');
-    const totalLivingArea = livingRooms.reduce(
-      (sum, r) => sum + (r.area_sqft || 0),
-      0
-    );
 
-    if (totalLivingArea === 0) {
+    let totalCeiling = 0;
+    for (const room of livingRooms) {
+      if (room.ceiling_sf) {
+        totalCeiling += room.ceiling_sf;
+      } else if (room.area_sqft) {
+        totalCeiling += room.area_sqft;
+      }
+    }
+
+    if (totalCeiling === 0) {
       return null;
     }
 
     return {
       area: 'Attic/Ceiling',
-      sqft: Math.round(totalLivingArea),
+      sqft: Math.round(totalCeiling),
       rValue: settings.r_values.attic,
       pricePerSqft: settings.pricing.attic_per_sqft,
-      totalCost: totalLivingArea * settings.pricing.attic_per_sqft,
+      totalCost: totalCeiling * settings.pricing.attic_per_sqft,
     };
   }
 
@@ -154,7 +188,8 @@ export function calculateAtticInsulation(
 }
 
 /**
- * Calculate crawlspace/floor insulation
+ * Calculate crawlspace/floor insulation.
+ * Prefers floor_sf from living rooms when no crawlspace rooms exist.
  */
 export function calculateFloorInsulation(
   rooms: Room[],

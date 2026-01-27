@@ -109,3 +109,107 @@ export function getExtractionPrompt(pageType: string): string {
       return FLOOR_PLAN_PROMPT; // Default to floor plan
   }
 }
+
+export const INSULATION_EXTRACTION_PROMPT = `You are an insulation estimator analyzing residential construction plans. Your job is to extract every measurement needed to quote wall, ceiling, and floor insulation.
+
+WHY EACH MEASUREMENT MATTERS:
+- Net Wall SF = Gross Wall SF minus all door/window openings. This is the #1 number for wall insulation bids.
+- Ceiling SF = area that gets blown-in attic insulation (usually equals living area footprint).
+- Floor SF = only matters if there's a crawlspace or raised floor (not slab-on-grade).
+- Stud Size = determines cavity depth: 2x4 = 3.5" (R-13/R-15), 2x6 = 5.5" (R-19/R-21).
+- Doors & Windows = deducted from gross wall SF to get net wall SF.
+
+EXTRACT THE FOLLOWING:
+
+1. LIVING & GARAGE AREAS
+   - Total living/heated area (sq ft) — look for "TOTAL LIVING AREA", "HEATED AREA", "CONDITIONED AREA"
+   - Garage area (sq ft) — separate from living area
+   - These tell us ceiling insulation area and help cross-check wall measurements
+
+2. EXTERIOR WALLS (most important for insulation)
+   - Measure or find the total exterior wall perimeter (ft) — add up all exterior wall segments
+   - Wall height (ft) — typically 8' or 9', check section views or wall details
+   - Gross Wall SF = perimeter × height
+   - Look at ALL exterior walls including garage walls that face outside
+
+3. WALL CONSTRUCTION DETAILS
+   - Stud size: 2x4 or 2x6 — check wall sections, typical wall details, or general notes
+   - Stud spacing: 16" OC or 24" OC
+   - Any notes about exterior wall assembly (e.g., "2x6 @ 16" OC w/ OSB sheathing")
+
+4. DOOR OPENINGS (to subtract from wall SF)
+   - Find the door schedule or count doors on the floor plan
+   - For each EXTERIOR door: label, width, height, area (w×h), and quantity
+   - Common sizes: 3068 = 3'0" × 6'8", 2868 = 2'8" × 6'8"
+   - Include garage overhead doors (e.g., 16' × 7' or 9' × 7')
+   - Do NOT include interior doors
+
+5. WINDOW OPENINGS (to subtract from wall SF)
+   - Find the window schedule or count windows on the floor plan
+   - For each window type: label, width, height, area (w×h), and quantity
+   - Window dimensions are often in inches (e.g., 3040 = 3'0" × 4'0")
+   - Count every exterior window
+
+6. CEILING / FLOOR SF
+   - Ceiling SF = area needing attic insulation. For single-story, this equals the living area footprint.
+   - Floor SF = only if crawlspace or raised floor exists. If slab-on-grade, floor_sf = null.
+
+7. INDIVIDUAL ROOMS — each labeled room: name, type, area
+
+Return JSON with this EXACT structure:
+{
+  "total_living_area_sqft": <number or null>,
+  "garage_area_sqft": <number or null>,
+  "exterior_wall_length_ft": <number or null>,
+  "wall_height_ft": <number or null>,
+  "gross_wall_sf": <number or null>,
+  "floor_sf": <number or null>,
+  "ceiling_sf": <number or null>,
+  "wall_sections": [
+    {
+      "location": "<e.g., Exterior Walls>",
+      "composition": "<e.g., 2x6 @ 16in OC w/ OSB sheathing>",
+      "stud_size": "<2x4 or 2x6>"
+    }
+  ],
+  "doors": [
+    {
+      "type": "door",
+      "label": "<door name or schedule ref>",
+      "width_ft": <number or null>,
+      "height_ft": <number or null>,
+      "area_sqft": <number or null>,
+      "count": <number>
+    }
+  ],
+  "windows": [
+    {
+      "type": "window",
+      "label": "<window name or schedule ref>",
+      "width_ft": <number or null>,
+      "height_ft": <number or null>,
+      "area_sqft": <number or null>,
+      "count": <number>
+    }
+  ],
+  "rooms": [
+    {
+      "name": "<room name>",
+      "type": "living" | "garage" | "attic" | "crawlspace",
+      "area_sqft": <number or null>,
+      "length_ft": <number or null>,
+      "width_ft": <number or null>
+    }
+  ],
+  "confidence": <number 0-1>,
+  "notes": "<assumptions made, things you couldn't find, estimated vs labeled values>"
+}
+
+CRITICAL RULES:
+- Only include EXTERIOR doors and windows (interior ones don't affect insulation)
+- Convert all dimensions to feet (3068 door = 3.0' × 6.67')
+- Calculate area_sqft for every opening (width × height)
+- If you can't find stud size, check general notes, typical details, or wall sections
+- If wall height isn't labeled, 8' is standard for most residential
+- Gross wall SF must equal exterior_wall_length_ft × wall_height_ft
+- Return ONLY the JSON, no other text`;

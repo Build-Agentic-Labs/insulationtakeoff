@@ -30,9 +30,9 @@ interface RecentProject {
   name: string;
   status: string;
   created_at: string;
-  client?: {
+  client: {
     name: string;
-  };
+  } | null;
 }
 
 interface RecentClient {

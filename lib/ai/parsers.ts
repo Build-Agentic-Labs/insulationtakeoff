@@ -104,3 +104,53 @@ export function validateRoofPlanData(data: RoofPlanData): boolean {
     data.ceiling_area_sqft !== null
   );
 }
+
+// --- Insulation-specific extraction types ---
+
+export interface ExtractedOpening {
+  type: 'door' | 'window';
+  label: string;
+  width_ft: number | null;
+  height_ft: number | null;
+  area_sqft: number | null;
+  count: number;
+}
+
+export interface ExtractedWallSection {
+  location: string;
+  composition: string | null;
+  stud_size: string | null;
+}
+
+export interface InsulationExtractionData {
+  total_living_area_sqft: number | null;
+  garage_area_sqft: number | null;
+  exterior_wall_length_ft: number | null;
+  wall_height_ft: number | null;
+  gross_wall_sf: number | null;
+  floor_sf: number | null;
+  ceiling_sf: number | null;
+  wall_sections: ExtractedWallSection[];
+  doors: ExtractedOpening[];
+  windows: ExtractedOpening[];
+  rooms: ExtractedRoom[];
+  confidence: number;
+  notes: string | null;
+}
+
+export function parseInsulationExtractionResponse(response: string): InsulationExtractionData | null {
+  return parseJSON<InsulationExtractionData>(response);
+}
+
+export function validateInsulationExtractionData(data: InsulationExtractionData): boolean {
+  if (data.confidence < 0.3) {
+    return false;
+  }
+
+  return (
+    data.total_living_area_sqft !== null ||
+    data.garage_area_sqft !== null ||
+    data.gross_wall_sf !== null ||
+    data.rooms.length > 0
+  );
+}

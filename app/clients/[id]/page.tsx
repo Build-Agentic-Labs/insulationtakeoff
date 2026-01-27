@@ -40,7 +40,7 @@ interface Project {
   name: string;
   status: string;
   created_at: string;
-  pdf_url: string;
+  pdf_url: string | null;
 }
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {

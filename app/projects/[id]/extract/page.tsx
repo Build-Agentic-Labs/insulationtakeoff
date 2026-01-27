@@ -1,45 +1,78 @@
 "use client";
 
-import { use, useState, useEffect, useCallback } from 'react';
+import { use, useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+import { Document, Page, pdfjs } from 'react-pdf';
+import { ScanningOverlay } from '@/components/extraction/ScanningOverlay';
+import { AnalysisPanel } from '@/components/extraction/AnalysisPanel';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Search, CheckCircle2, AlertCircle, Upload, FileText, RefreshCw, Image } from 'lucide-react';
+import { Loader2, ArrowLeft, Play } from 'lucide-react';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
 
-const ALLOWED_TYPES = [
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-];
-
-const ACCEPTED_EXTENSIONS = '.pdf,.jpg,.jpeg,.png,.webp';
-
-function isAllowedFileType(mimeType: string): boolean {
-  return ALLOWED_TYPES.includes(mimeType);
-}
-
-function isImageFile(url: string): boolean {
-  const ext = url.split('.').pop()?.toLowerCase().split('?')[0];
-  return ['jpg', 'jpeg', 'png', 'webp'].includes(ext || '');
-}
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
 
 export default function ExtractPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+
   const [project, setProject] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isExtracting, setIsExtracting] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<string>('');
-  const [showUpload, setShowUpload] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [autoStarted, setAutoStarted] = useState(false);
+
+  // PDF state
+  const [numPages, setNumPages] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [containerHeight, setContainerHeight] = useState(0);
+  const pageIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadProject();
   }, [id]);
+
+  // Measure container for full-screen PDF sizing
+  useEffect(() => {
+    const updateHeight = () => {
+      if (containerRef.current) {
+        setContainerHeight(containerRef.current.clientHeight);
+      }
+    };
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+    return () => window.removeEventListener('resize', updateHeight);
+  }, []);
+
+  // Auto-start extraction once project loads
+  useEffect(() => {
+    if (project && !autoStarted && !isExtracting && !isComplete) {
+      setAutoStarted(true);
+      startExtraction();
+    }
+  }, [project]);
+
+  // Auto-advance pages during extraction
+  useEffect(() => {
+    if (isExtracting && numPages > 1) {
+      pageIntervalRef.current = setInterval(() => {
+        setCurrentPage(prev => {
+          const next = prev + 1;
+          return next > numPages ? 1 : next;
+        });
+      }, 5000);
+    }
+
+    return () => {
+      if (pageIntervalRef.current) {
+        clearInterval(pageIntervalRef.current);
+      }
+    };
+  }, [isExtracting, numPages]);
 
   const loadProject = async () => {
     try {
@@ -56,83 +89,16 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     }
   };
 
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileUpload(e.dataTransfer.files[0]);
-    }
-  }, []);
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileUpload(e.target.files[0]);
-    }
-  };
-
-  const handleFileUpload = async (file: File) => {
-    if (!isAllowedFileType(file.type)) {
-      setError('Please upload a PDF or image file (JPG, PNG, WEBP)');
-      return;
-    }
-
-    setIsUploading(true);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('projectId', id);
-
-      const response = await fetch('/api/upload/replace', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Upload failed');
-      }
-
-      // Refresh project data
-      await loadProject();
-      setShowUpload(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleExtract = async () => {
+  const startExtraction = async () => {
     setIsExtracting(true);
-    setError(null);
-    setProgress('Starting extraction...');
+    setHasError(false);
+    setErrorMessage('');
 
     try {
-      setProgress('Analyzing file with Claude AI...');
-
       const response = await fetch('/api/extract', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          projectId: id,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: id }),
       });
 
       const data = await response.json();
@@ -141,250 +107,134 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
         throw new Error(data.error || 'Extraction failed');
       }
 
-      setProgress('Extraction completed successfully!');
+      setIsComplete(true);
+      setIsExtracting(false);
 
-      // Wait a moment to show success message
+      if (pageIntervalRef.current) {
+        clearInterval(pageIntervalRef.current);
+      }
+
       setTimeout(() => {
         router.push(`/projects/${id}/review`);
-      }, 1500);
+      }, 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Extraction failed');
+      setHasError(true);
+      setErrorMessage(err instanceof Error ? err.message : 'Extraction failed');
       setIsExtracting(false);
-      setProgress('');
+      if (pageIntervalRef.current) {
+        clearInterval(pageIntervalRef.current);
+      }
     }
   };
 
-  const isReExtract = project?.status !== 'uploaded';
-  const currentFileIsImage = project?.pdf_url && isImageFile(project.pdf_url);
+  const handleRetry = () => {
+    setHasError(false);
+    setErrorMessage('');
+    setIsComplete(false);
+    startExtraction();
+  };
+
+  // PDF height = container minus some padding
+  const pdfHeight = containerHeight > 0 ? containerHeight - 32 : 700;
 
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-8 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin" />
+      <div className="h-screen bg-zinc-950 flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="h-screen bg-zinc-950 flex items-center justify-center">
+        <p className="text-zinc-500">Project not found</p>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="max-w-2xl mx-auto space-y-6">
-        {/* Current File Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              {currentFileIsImage ? (
-                <Image className="h-5 w-5" />
-              ) : (
-                <FileText className="h-5 w-5" />
-              )}
-              Current File
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`h-12 w-12 rounded-lg flex items-center justify-center ${
-                  currentFileIsImage
-                    ? 'bg-blue-100 dark:bg-blue-900/30'
-                    : 'bg-red-100 dark:bg-red-900/30'
-                }`}>
-                  {currentFileIsImage ? (
-                    <Image className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-                  ) : (
-                    <FileText className="h-6 w-6 text-red-600 dark:text-red-400" />
-                  )}
-                </div>
-                <div>
-                  <p className="font-medium">{project?.name}</p>
-                  <a
-                    href={project?.pdf_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline"
-                  >
-                    View {currentFileIsImage ? 'Image' : 'PDF'}
-                  </a>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowUpload(!showUpload)}
-                disabled={isExtracting || isUploading}
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Replace File
-              </Button>
-            </div>
+    <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
+      {/* Minimal header */}
+      <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push(`/projects/${id}`)}
+            disabled={isExtracting}
+            className="text-zinc-400 hover:text-white"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+          <div className="h-4 w-px bg-zinc-800" />
+          <h1 className="text-sm font-medium text-zinc-300">{project.name}</h1>
+        </div>
 
-            {/* Upload New File Section */}
-            {showUpload && (
-              <div className="mt-4 pt-4 border-t">
-                <p className="text-sm text-muted-foreground mb-3">
-                  Upload a new PDF or image to replace the current file
-                </p>
+        {hasError && (
+          <Button
+            size="sm"
+            onClick={handleRetry}
+            className="bg-cyan-600 hover:bg-cyan-700 text-white"
+          >
+            <Play className="h-3 w-3 mr-2" />
+            Retry
+          </Button>
+        )}
+      </div>
+
+      {/* Full-screen PDF with floating overlay */}
+      <div ref={containerRef} className="flex-1 relative overflow-hidden">
+        {/* PDF fills the entire area */}
+        <div className="absolute inset-0 flex items-center justify-center bg-zinc-950 overflow-auto">
+          <div
+            className={`relative ${isExtracting ? 'animate-pulse-glow' : ''}`}
+            style={{ borderRadius: '4px' }}
+          >
+            <Document
+              file={project.pdf_url}
+              onLoadSuccess={({ numPages }) => setNumPages(numPages)}
+              loading={
                 <div
-                  className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-                    dragActive
-                      ? 'border-primary bg-primary/5'
-                      : 'border-zinc-300 dark:border-zinc-600 hover:border-primary'
-                  }`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
+                  className="flex items-center justify-center bg-zinc-900 rounded"
+                  style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
                 >
-                  {isUploading ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                      <p className="text-sm text-muted-foreground">Uploading...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                      <p className="text-sm text-muted-foreground mb-2">
-                        Drag and drop a file here, or
-                      </p>
-                      <label>
-                        <input
-                          type="file"
-                          accept={ACCEPTED_EXTENSIONS}
-                          onChange={handleFileSelect}
-                          className="hidden"
-                        />
-                        <span className="text-sm text-primary hover:underline cursor-pointer">
-                          browse to select
-                        </span>
-                      </label>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        PDF, JPG, PNG, or WEBP
-                      </p>
-                    </>
-                  )}
+                  <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              }
+            >
+              <Page
+                pageNumber={currentPage}
+                height={pdfHeight}
+                renderTextLayer={false}
+                renderAnnotationLayer={false}
+              />
+            </Document>
 
-        {/* Extraction Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              {isReExtract ? (
-                <RefreshCw className="h-6 w-6" />
-              ) : (
-                <Search className="h-6 w-6" />
-              )}
-              {isReExtract ? 'Re-Extract Data' : 'AI Data Extraction'}
-            </CardTitle>
-            <CardDescription>
-              {isReExtract
-                ? 'Run extraction again to update measurements from the file'
-                : 'Extract measurements from architectural plans using Claude AI'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {isReExtract && (
-              <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-                <p className="text-sm text-amber-800 dark:text-amber-200">
-                  <strong>Note:</strong> Re-extracting will replace the existing extracted data.
-                  Any manual edits you made in the review page will be overwritten.
-                </p>
-              </div>
-            )}
+            {/* Scanning overlay on top of PDF */}
+            <ScanningOverlay isActive={isExtracting} />
+          </div>
+        </div>
 
-            <div className="space-y-4">
-              <div className="border-l-4 border-primary pl-4 py-2">
-                <h3 className="font-semibold mb-2">What will be extracted:</h3>
-                <ul className="space-y-1 text-sm text-muted-foreground">
-                  <li>• Living area square footage</li>
-                  <li>• Garage area square footage</li>
-                  <li>• Wall heights from section views</li>
-                  <li>• Attic/ceiling area from roof plans</li>
-                  <li>• Individual room dimensions</li>
-                </ul>
-              </div>
+        {/* Page indicator — bottom center */}
+        {numPages > 0 && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-zinc-800/90 backdrop-blur px-3 py-1.5 rounded-full">
+            <p className="text-xs text-zinc-400">
+              Page {currentPage} of {numPages}
+            </p>
+          </div>
+        )}
 
-              <div className="bg-muted/50 rounded-lg p-4">
-                <p className="text-sm">
-                  <strong>Note:</strong> The extraction process may take 1-3 minutes depending on the complexity of your file.
-                  Claude AI will analyze the content and extract relevant measurements.
-                </p>
-              </div>
-            </div>
-
-            {isExtracting && (
-              <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                <div className="flex-1">
-                  <p className="font-medium text-blue-900 dark:text-blue-100">
-                    {progress}
-                  </p>
-                  <p className="text-sm text-blue-700 dark:text-blue-300">
-                    Please wait...
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <div className="flex items-center gap-3 p-4 bg-destructive/10 rounded-lg">
-                <AlertCircle className="h-5 w-5 text-destructive" />
-                <div className="flex-1">
-                  <p className="font-medium text-destructive">Error</p>
-                  <p className="text-sm text-destructive/90">{error}</p>
-                </div>
-              </div>
-            )}
-
-            {progress === 'Extraction completed successfully!' && (
-              <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-950 rounded-lg">
-                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                <div className="flex-1">
-                  <p className="font-medium text-green-900 dark:text-green-100">
-                    Success!
-                  </p>
-                  <p className="text-sm text-green-700 dark:text-green-300">
-                    Redirecting to review page...
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <Button
-                onClick={handleExtract}
-                disabled={isExtracting || isUploading}
-                className="flex-1"
-              >
-                {isExtracting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Extracting...
-                  </>
-                ) : isReExtract ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Re-Extract Data
-                  </>
-                ) : (
-                  <>
-                    <Search className="mr-2 h-4 w-4" />
-                    Start Extraction
-                  </>
-                )}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => router.push(`/projects/${id}`)}
-                disabled={isExtracting}
-              >
-                Back
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Floating analysis panel — bottom right */}
+        <div className="absolute bottom-4 right-4 z-20 w-80 max-h-[60%] rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-zinc-800">
+          <AnalysisPanel
+            isActive={isExtracting}
+            isComplete={isComplete}
+            hasError={hasError}
+            errorMessage={errorMessage}
+          />
+        </div>
       </div>
     </div>
   );
