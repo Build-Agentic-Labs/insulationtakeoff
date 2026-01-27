@@ -13,13 +13,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create project record without a file
+    // Create project record
     const { data: project, error: projectError } = await supabaseAdmin
       .from('projects')
       .insert({
         name: name.trim(),
-        pdf_url: null, // No file for manual projects
-        status: 'manual', // New status for manual projects
+        pdf_url: null,
+        status: body.status || 'manual',
         client_id: clientId || null,
       })
       .select()

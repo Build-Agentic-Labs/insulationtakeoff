@@ -123,25 +123,47 @@ function NewProjectContent() {
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('name', projectName);
-      if (selectedClientId) {
-        formData.append('clientId', selectedClientId);
-      }
-
-      const response = await fetch('/api/upload', {
+      // 1. Create project record via API (small JSON, no file)
+      const createRes = await fetch('/api/projects', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: projectName,
+          clientId: selectedClientId,
+          status: 'uploaded',
+        }),
+      });
+      const createData = await createRes.json();
+      if (!createRes.ok) throw new Error(createData.error || 'Failed to create project');
+
+      const projectId = createData.project.id;
+
+      // 2. Get a signed upload URL from the server
+      const fileExt = selectedFile.name.split('.').pop()?.toLowerCase() || 'pdf';
+      const presignRes = await fetch('/api/upload/presign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, fileExtension: fileExt }),
+      });
+      const presignData = await presignRes.json();
+      if (!presignRes.ok) throw new Error(presignData.error || 'Failed to get upload URL');
+
+      // 3. Upload file directly to Supabase Storage via signed URL (bypasses Vercel 4.5MB limit)
+      const uploadRes = await fetch(presignData.signedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': selectedFile.type },
+        body: selectedFile,
+      });
+      if (!uploadRes.ok) throw new Error('File upload failed');
+
+      // 4. Update project with the public file URL
+      await fetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_url: presignData.publicUrl }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Upload failed');
-      }
-
-      router.push(`/projects/${data.project.id}/extract`);
+      router.push(`/projects/${projectId}/extract`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
       setIsUploading(false);
