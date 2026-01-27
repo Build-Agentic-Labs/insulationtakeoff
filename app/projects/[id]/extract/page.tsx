@@ -101,7 +101,13 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
         body: JSON.stringify({ projectId: id }),
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error('Extraction timed out — the PDF may be too large. Please try again.');
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Extraction failed');

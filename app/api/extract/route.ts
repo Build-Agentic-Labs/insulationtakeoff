@@ -4,6 +4,8 @@ import { analyzePDF } from '@/lib/ai/claude-client';
 import { parseInsulationExtractionResponse, InsulationExtractionData } from '@/lib/ai/parsers';
 import { INSULATION_EXTRACTION_PROMPT } from '@/lib/ai/prompts';
 
+export const maxDuration = 60;
+
 function getMockExtractionData(): InsulationExtractionData {
   return {
     total_living_area_sqft: 2500,
