@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       .from('projects')
       .insert({
         name: name.trim(),
-        pdf_url: null,
+        pdf_url: '',
         status: body.status || 'manual',
         client_id: clientId || null,
       })
