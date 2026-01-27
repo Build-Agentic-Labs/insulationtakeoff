@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Thermometer,
 } from 'lucide-react';
 
 interface NavItem {
@@ -60,16 +60,20 @@ export function Sidebar() {
       {/* Logo */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-zinc-800">
         <Link href="/" className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-            <Thermometer className="h-5 w-5 text-white" />
-          </div>
+          <Image
+            src="/ev-insulation-logo.jpg"
+            alt="EV Insulation"
+            width={36}
+            height={36}
+            className="rounded-lg flex-shrink-0"
+          />
           <span
             className={cn(
               "font-semibold text-lg whitespace-nowrap transition-all duration-300",
               collapsed ? "opacity-0 w-0" : "opacity-100"
             )}
           >
-            InsulateQuote
+            EV Insulation
           </span>
         </Link>
       </div>

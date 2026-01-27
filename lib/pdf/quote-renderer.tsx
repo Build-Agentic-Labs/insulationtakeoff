@@ -4,10 +4,24 @@ import {
   Page,
   Text,
   View,
+  Image,
   StyleSheet,
   Font,
 } from '@react-pdf/renderer';
+import fs from 'fs';
+import path from 'path';
 import { LineItem } from '../calculations/insulation';
+
+function getLogoSrc(): string {
+  try {
+    const logoPath = path.join(process.cwd(), 'public', 'ev-insulation-logo.jpg');
+    const logoBuffer = fs.readFileSync(logoPath);
+    return `data:image/jpeg;base64,${logoBuffer.toString('base64')}`;
+  } catch (e) {
+    console.error('Failed to load logo:', e);
+    return '';
+  }
+}
 import { formatCurrency, formatSqft } from '../calculations/pricing';
 
 // Define styles for the PDF
@@ -18,7 +32,18 @@ const styles = StyleSheet.create({
     fontFamily: 'Helvetica',
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 30,
+  },
+  logo: {
+    width: 60,
+    height: 60,
+    marginRight: 15,
+    borderRadius: 4,
+  },
+  headerText: {
+    flex: 1,
   },
   companyName: {
     fontSize: 24,
@@ -170,7 +195,7 @@ export function QuotePDF({
   lineItems,
   totalCost,
   totalSqft,
-  companyName = 'Insulation Experts Inc.',
+  companyName = 'East Valley Insulation LLC',
   companyAddress = '123 Main St, Your City, ST 12345',
   companyPhone = '(555) 123-4567',
   companyEmail = 'info@insulationexperts.com',
@@ -180,11 +205,17 @@ export function QuotePDF({
       <Page size="A4" style={styles.page}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.companyName}>{companyName}</Text>
-          <Text style={styles.companyInfo}>{companyAddress}</Text>
-          <Text style={styles.companyInfo}>
-            Phone: {companyPhone} | Email: {companyEmail}
-          </Text>
+          <Image
+            style={styles.logo}
+            src={getLogoSrc()}
+          />
+          <View style={styles.headerText}>
+            <Text style={styles.companyName}>{companyName}</Text>
+            <Text style={styles.companyInfo}>{companyAddress}</Text>
+            <Text style={styles.companyInfo}>
+              Phone: {companyPhone} | Email: {companyEmail}
+            </Text>
+          </View>
         </View>
 
         {/* Title */}
@@ -257,9 +288,6 @@ export function QuotePDF({
           <Text style={styles.notesTitle}>Important Notes:</Text>
           <View style={styles.notesList}>
             <Text style={styles.notesItem}>
-              • All measurements extracted from architectural plans using AI technology
-            </Text>
-            <Text style={styles.notesItem}>
               • Final measurements will be verified on-site before installation
             </Text>
             <Text style={styles.notesItem}>
@@ -273,8 +301,6 @@ export function QuotePDF({
 
         {/* Footer */}
         <Text style={styles.footer}>
-          This quote was generated using AI-powered measurement extraction from architectural plans.
-          {'\n'}
           All measurements should be verified on-site before final installation.
         </Text>
       </Page>

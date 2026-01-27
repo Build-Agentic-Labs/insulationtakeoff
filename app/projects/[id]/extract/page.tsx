@@ -134,6 +134,8 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     startExtraction();
   };
 
+  const [pdfError, setPdfError] = useState(false);
+
   // PDF height = container minus some padding
   const pdfHeight = containerHeight > 0 ? containerHeight - 32 : 700;
 
@@ -192,25 +194,36 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
             className={`relative ${isExtracting ? 'animate-pulse-glow' : ''}`}
             style={{ borderRadius: '4px' }}
           >
-            <Document
-              file={project.pdf_url}
-              onLoadSuccess={({ numPages }) => setNumPages(numPages)}
-              loading={
-                <div
-                  className="flex items-center justify-center bg-zinc-900 rounded"
-                  style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
-                >
-                  <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
-                </div>
-              }
-            >
-              <Page
-                pageNumber={currentPage}
-                height={pdfHeight}
-                renderTextLayer={false}
-                renderAnnotationLayer={false}
-              />
-            </Document>
+            {pdfError ? (
+              <div
+                className="flex flex-col items-center justify-center bg-zinc-900 rounded gap-3"
+                style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
+              >
+                <p className="text-zinc-400 text-sm">PDF preview unavailable</p>
+                <p className="text-zinc-600 text-xs">Extraction is still running in the background</p>
+              </div>
+            ) : (
+              <Document
+                file={project.pdf_url}
+                onLoadSuccess={({ numPages }) => setNumPages(numPages)}
+                onLoadError={() => setPdfError(true)}
+                loading={
+                  <div
+                    className="flex items-center justify-center bg-zinc-900 rounded"
+                    style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
+                  >
+                    <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
+                  </div>
+                }
+              >
+                <Page
+                  pageNumber={currentPage}
+                  height={pdfHeight}
+                  renderTextLayer={false}
+                  renderAnnotationLayer={false}
+                />
+              </Document>
+            )}
 
             {/* Scanning overlay on top of PDF */}
             <ScanningOverlay isActive={isExtracting} />

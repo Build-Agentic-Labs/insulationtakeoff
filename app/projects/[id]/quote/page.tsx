@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatCurrency, formatSqft } from '@/lib/calculations/pricing';
-import { FileText, Download, Loader2, AlertCircle, Settings, Plus, Trash2, Check } from 'lucide-react';
+import { FileText, Download, Mail, Loader2, AlertCircle, Settings, Plus, Trash2, Check } from 'lucide-react';
 
 // ─── Interfaces ─────────────────────────────────────────────
 
@@ -950,12 +950,26 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                         </Button>
 
                         {quote?.pdf_url && (
-                          <a href={quote.pdf_url} target="_blank" rel="noopener noreferrer" className="block">
-                            <Button variant="outline" className="w-full">
-                              <Download className="mr-2 h-4 w-4" />
-                              Download PDF
+                          <>
+                            <Button
+                              variant="outline"
+                              className="w-full"
+                              onClick={() => {
+                                const subject = encodeURIComponent(`Insulation Quote - ${project?.name || 'Project'}`);
+                                const body = encodeURIComponent(`Please find the insulation quote attached.\n\nDownload: ${quote.pdf_url}`);
+                                window.open(`mailto:?subject=${subject}&body=${body}`);
+                              }}
+                            >
+                              <Mail className="mr-2 h-4 w-4" />
+                              Email Quote
                             </Button>
-                          </a>
+                            <a href={quote.pdf_url} target="_blank" rel="noopener noreferrer" className="block">
+                              <Button variant="outline" className="w-full">
+                                <Download className="mr-2 h-4 w-4" />
+                                Download PDF
+                              </Button>
+                            </a>
+                          </>
                         )}
                       </div>
 

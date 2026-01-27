@@ -239,6 +239,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
         .eq('project_id', id)
         .order('created_at', { ascending: true });
 
+      console.log('Rooms loaded:', roomsData);
       setRooms(roomsData || []);
 
       const { data: openingsData } = await supabase
@@ -247,6 +248,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
         .eq('project_id', id)
         .order('created_at', { ascending: true });
 
+      console.log('Openings loaded:', openingsData);
       setOpenings(openingsData || []);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -1099,10 +1101,18 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                     </div>
                   </div>
                 ) : (
-                  <div className="text-sm text-zinc-500">
-                    {mainRoom
-                      ? `Source: ${mainRoom.name} (living area footprint)`
-                      : 'No living room data available — add a room first'}
+                  <div className="space-y-2">
+                    <div className="bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-3 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Ceiling Area</span>
+                        <span className="font-medium">{ceilingSF > 0 ? `${ceilingSF.toLocaleString()} sf` : '—'}</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-zinc-400">
+                      {mainRoom
+                        ? `Source: ${mainRoom.name} (living area footprint)`
+                        : 'No living room data available — add a room first'}
+                    </p>
                   </div>
                 )}
               </SegmentCard>
@@ -1143,8 +1153,16 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                       </div>
                     </div>
                   ) : (
-                    <div className="text-sm text-zinc-500">
-                      Source: {mainRoom?.name || 'Living room'} floor area
+                    <div className="space-y-2">
+                      <div className="bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-3 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Floor Area</span>
+                          <span className="font-medium">{floorSF > 0 ? `${floorSF.toLocaleString()} sf` : '—'}</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-zinc-400">
+                        Source: {mainRoom?.name || 'Living room'} floor area
+                      </p>
                     </div>
                   )}
                 </SegmentCard>

@@ -6,7 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "InsulateQuote - AI-Powered Insulation Quotes",
+  title: "EV Insulation - AI-Powered Insulation Quotes",
   description: "AI-powered insulation quote generator from architectural PDFs",
 };
 
