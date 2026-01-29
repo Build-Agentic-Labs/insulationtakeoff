@@ -31,7 +31,7 @@ export function PDFViewer({
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [pageNumber, setPageNumber] = useState(initialPage);
-  const [scale, setScale] = useState(0.6);
+  const [scale, setScale] = useState(0.3);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
