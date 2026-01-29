@@ -28,6 +28,7 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
   // PDF state
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pdfReady, setPdfReady] = useState(false);
   const [containerHeight, setContainerHeight] = useState(0);
   const pageIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -211,7 +212,10 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
             ) : (
               <Document
                 file={project.pdf_url}
-                onLoadSuccess={({ numPages }) => setNumPages(numPages)}
+                onLoadSuccess={({ numPages }) => {
+                  setNumPages(numPages);
+                  setPdfReady(true);
+                }}
                 onLoadError={() => setPdfError(true)}
                 loading={
                   <div
@@ -222,12 +226,14 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
                   </div>
                 }
               >
-                <Page
-                  pageNumber={currentPage}
-                  height={pdfHeight}
-                  renderTextLayer={false}
-                  renderAnnotationLayer={false}
-                />
+                {pdfReady && (
+                  <Page
+                    pageNumber={currentPage}
+                    height={pdfHeight}
+                    renderTextLayer={false}
+                    renderAnnotationLayer={false}
+                  />
+                )}
               </Document>
             )}
 
