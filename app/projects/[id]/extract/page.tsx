@@ -7,7 +7,8 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { ScanningOverlay } from '@/components/extraction/ScanningOverlay';
 import { AnalysisPanel } from '@/components/extraction/AnalysisPanel';
 import { Button } from '@/components/ui/button';
-import { Loader2, ArrowLeft, Play } from 'lucide-react';
+import { Loader2, ArrowLeft, Play, Lightbulb } from 'lucide-react';
+import { DemoTooltip } from '@/components/demo/DemoTooltip';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -179,6 +180,14 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
           </Button>
           <div className="h-4 w-px bg-zinc-800" />
           <h1 className="text-sm font-medium text-zinc-300">{project.name}</h1>
+          <div className="h-4 w-px bg-zinc-800" />
+          <div className="flex items-center gap-2 px-2 py-1 rounded bg-cyan-500/10 border border-cyan-500/20">
+            <Lightbulb className="h-3 w-3 text-cyan-400" />
+            <span className="text-xs text-cyan-300">Step 2: AI Extraction</span>
+            <DemoTooltip>
+              Our AI is analyzing your document page-by-page, extracting room dimensions, wall measurements, door counts, and window counts. This typically takes 15-30 seconds.
+            </DemoTooltip>
+          </div>
         </div>
 
         {hasError && (

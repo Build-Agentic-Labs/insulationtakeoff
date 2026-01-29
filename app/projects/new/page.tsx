@@ -20,6 +20,8 @@ import {
   Upload,
   PenLine,
 } from 'lucide-react';
+import { DemoInstructions } from '@/components/demo/DemoInstructions';
+import { DemoTooltip } from '@/components/demo/DemoTooltip';
 
 interface Client {
   id: string;
@@ -227,6 +229,17 @@ function NewProjectContent() {
       </div>
 
       <div className="max-w-2xl">
+        <DemoInstructions
+          title="Step 1: Create a New Project"
+          steps={[
+            "Optionally select or create a client to associate with this project",
+            "Enter a project name (e.g., the lot number or address)",
+            "Upload a PDF floor plan or image to auto-extract measurements",
+            "Or skip the file to enter measurements manually"
+          ]}
+          tip="For best results, upload architectural floor plans with room dimensions labeled."
+        />
+
         <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-3">
@@ -242,7 +255,12 @@ function NewProjectContent() {
           <CardContent className="space-y-6">
             {/* Client Selection */}
             <div className="space-y-2">
-              <Label>Client</Label>
+              <Label className="flex items-center gap-2">
+                Client
+                <DemoTooltip>
+                  Link this project to a client for easy organization. Quotes will be addressed to the selected client.
+                </DemoTooltip>
+              </Label>
               {isLoadingClients ? (
                 <div className="flex items-center gap-2 text-sm text-zinc-500">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -382,8 +400,11 @@ function NewProjectContent() {
 
             {/* Project Name */}
             <div className="space-y-2">
-              <Label htmlFor="project-name">
+              <Label htmlFor="project-name" className="flex items-center gap-2">
                 Project Name <span className="text-red-500">*</span>
+                <DemoTooltip>
+                  Use a descriptive name like the lot number, address, or builder reference. This will appear on the final quote.
+                </DemoTooltip>
               </Label>
               <Input
                 id="project-name"
@@ -397,8 +418,11 @@ function NewProjectContent() {
 
             {/* File Upload (Optional) */}
             <div className="space-y-2">
-              <Label>
+              <Label className="flex items-center gap-2">
                 File (PDF or Image) <span className="text-zinc-400 text-sm font-normal">- optional</span>
+                <DemoTooltip>
+                  Upload architectural plans (PDF) or photos. Our AI will scan the document to extract room dimensions, wall measurements, and door/window counts.
+                </DemoTooltip>
               </Label>
               <FileUpload
                 onFileSelect={setSelectedFile}

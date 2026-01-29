@@ -30,6 +30,8 @@ import {
   ChevronRight,
   LucideIcon,
 } from 'lucide-react';
+import { DemoInstructions } from '@/components/demo/DemoInstructions';
+import { DemoTooltip } from '@/components/demo/DemoTooltip';
 
 // ─── Interfaces ─────────────────────────────────────────────
 
@@ -87,6 +89,7 @@ interface SegmentCardProps {
   editing?: boolean;
   onEdit?: () => void;
   onCancelEdit?: () => void;
+  tooltip?: ReactNode;
 }
 
 function SegmentCard({
@@ -101,6 +104,7 @@ function SegmentCard({
   editing,
   onEdit,
   onCancelEdit,
+  tooltip,
 }: SegmentCardProps) {
   return (
     <Card
@@ -123,7 +127,10 @@ function SegmentCard({
               <Icon className="h-5 w-5" />
             </div>
             <div>
-              <CardTitle className="text-base">{title}</CardTitle>
+              <CardTitle className="text-base flex items-center gap-2">
+                {title}
+                {tooltip}
+              </CardTitle>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span className="text-2xl font-bold text-zinc-900 dark:text-white">
                   {heroValue}
@@ -643,6 +650,18 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
             {/* Right panel: Segment Cards */}
             <div className="overflow-auto space-y-3">
+              {/* Demo Instructions */}
+              <DemoInstructions
+                title="Step 3: Review Extracted Data"
+                steps={[
+                  "Review each segment (Walls, Doors, Windows, Ceiling, Rooms) extracted from your document",
+                  "Click 'Edit' to correct any values that don't match your plans",
+                  "Click 'Verify' on each segment to confirm the data is accurate",
+                  "Once all segments are verified, click 'Generate Quote' to proceed"
+                ]}
+                tip="Net Wall SF = Gross Wall SF minus door and window openings. This is the actual insulation area."
+              />
+
               {/* Progress Bar */}
               <div className="bg-white dark:bg-zinc-900 border rounded-lg px-4 py-3 flex items-center gap-4">
                 <div className="flex-1">
@@ -680,6 +699,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 editing={editingSegment === 'walls'}
                 onEdit={mainRoom ? startEditWalls : undefined}
                 onCancelEdit={() => setEditingSegment(null)}
+                tooltip={
+                  <DemoTooltip>
+                    Exterior wall insulation area. Net Wall SF = Gross walls minus door/window openings. Wall composition (e.g., 2x6 studs) determines insulation thickness.
+                  </DemoTooltip>
+                }
               >
                 {editingSegment === 'walls' ? (
                   <div className="space-y-3">
@@ -800,6 +824,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 editing={editingSegment === 'doors'}
                 onEdit={() => startEditOpenings('door')}
                 onCancelEdit={() => setEditingSegment(null)}
+                tooltip={
+                  <DemoTooltip>
+                    Door openings are deducted from wall area since they don't need insulation. Total SF = Width × Height × Quantity.
+                  </DemoTooltip>
+                }
               >
                 {editingSegment === 'doors' ? (
                   <div className="space-y-2">
@@ -939,6 +968,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 editing={editingSegment === 'windows'}
                 onEdit={() => startEditOpenings('window')}
                 onCancelEdit={() => setEditingSegment(null)}
+                tooltip={
+                  <DemoTooltip>
+                    Window openings are deducted from wall area. Group similar windows together with a quantity count to simplify the list.
+                  </DemoTooltip>
+                }
               >
                 {editingSegment === 'windows' ? (
                   <div className="space-y-2">
@@ -1078,6 +1112,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 editing={editingSegment === 'ceiling'}
                 onEdit={mainRoom ? startEditCeiling : undefined}
                 onCancelEdit={() => setEditingSegment(null)}
+                tooltip={
+                  <DemoTooltip>
+                    Ceiling/attic insulation area, typically equal to the home's footprint. Blown-in insulation is common for attics.
+                  </DemoTooltip>
+                }
               >
                 {editingSegment === 'ceiling' ? (
                   <div className="space-y-3">
@@ -1130,6 +1169,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                   editing={editingSegment === 'floor'}
                   onEdit={mainRoom ? startEditFloor : undefined}
                   onCancelEdit={() => setEditingSegment(null)}
+                  tooltip={
+                    <DemoTooltip>
+                      Floor insulation for homes with crawlspaces or raised foundations. Not needed for slab-on-grade construction.
+                    </DemoTooltip>
+                  }
                 >
                   {editingSegment === 'floor' ? (
                     <div className="space-y-3">

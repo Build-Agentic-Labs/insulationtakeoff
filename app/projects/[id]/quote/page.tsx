@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatCurrency, formatSqft } from '@/lib/calculations/pricing';
 import { FileText, Download, Mail, Loader2, AlertCircle, Settings, Plus, Trash2, Check } from 'lucide-react';
+import { DemoInstructions } from '@/components/demo/DemoInstructions';
+import { DemoTooltip } from '@/components/demo/DemoTooltip';
 
 // ─── Interfaces ─────────────────────────────────────────────
 
@@ -581,6 +583,18 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
           </Link>
         </div>
 
+        {/* Demo Instructions */}
+        <DemoInstructions
+          title="Step 4: Generate Quote"
+          steps={[
+            "Toggle which insulation areas to include (Attic, Walls, Garage, Floor)",
+            "Select a product or manually set the R-value and price per sq ft",
+            "Add custom line items for any additional work not auto-detected",
+            "Review the quote preview, then click 'Generate Quote' to create the PDF"
+          ]}
+          tip="R-value measures insulation effectiveness. Higher R = better insulation. R-38 to R-60 is typical for attics in most climates."
+        />
+
         {/* Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left Column - Configuration */}
@@ -591,6 +605,9 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                 <CardTitle className="flex items-center gap-2">
                   <Settings className="h-5 w-5" />
                   Select Insulation Areas
+                  <DemoTooltip>
+                    These areas were auto-detected from your floor plans. Toggle each area on/off and configure the insulation specifications.
+                  </DemoTooltip>
                 </CardTitle>
                 <CardDescription>
                   Choose which areas to include and set R-values for each
