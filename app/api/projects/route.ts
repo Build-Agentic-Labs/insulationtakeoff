@@ -16,10 +16,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Create project record
+    // Use 'reviewing' as default status (database constraint doesn't allow 'manual')
     const insertData = {
       name: name.trim(),
       pdf_url: '',
-      status: body.status || 'manual',
+      status: body.status || 'reviewing',
       client_id: clientId || null,
     };
     console.log('Insert data:', insertData);
