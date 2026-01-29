@@ -6,6 +6,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, clientId } = body;
 
+    console.log('Creating project with:', { name, clientId, status: body.status });
+
     if (!name) {
       return NextResponse.json(
         { error: 'Project name is required' },
@@ -14,21 +16,25 @@ export async function POST(request: NextRequest) {
     }
 
     // Create project record
+    const insertData = {
+      name: name.trim(),
+      pdf_url: '',
+      status: body.status || 'manual',
+      client_id: clientId || null,
+    };
+    console.log('Insert data:', insertData);
+
     const { data: project, error: projectError } = await supabaseAdmin
       .from('projects')
-      .insert({
-        name: name.trim(),
-        pdf_url: '',
-        status: body.status || 'manual',
-        client_id: clientId || null,
-      })
+      .insert(insertData)
       .select()
       .single();
 
     if (projectError) {
       console.error('Error creating project:', projectError);
+      console.error('Project error details:', JSON.stringify(projectError, null, 2));
       return NextResponse.json(
-        { error: 'Failed to create project' },
+        { error: `Failed to create project: ${projectError.message || projectError.code || 'Unknown error'}` },
         { status: 500 }
       );
     }
