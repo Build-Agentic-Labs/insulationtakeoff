@@ -31,7 +31,7 @@ export function PDFViewer({
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [pageNumber, setPageNumber] = useState(initialPage);
-  const [scale, setScale] = useState(1.0);
+  const [scale, setScale] = useState(0.6);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,11 +63,11 @@ export function PDFViewer({
   }
 
   function zoomIn() {
-    setScale((prev) => Math.min(prev + 0.2, 3.0));
+    setScale((prev) => Math.min(prev + 0.1, 2.0));
   }
 
   function zoomOut() {
-    setScale((prev) => Math.max(prev - 0.2, 0.5));
+    setScale((prev) => Math.max(prev - 0.1, 0.3));
   }
 
   const currentPageHighlights = highlights.filter((h) => h.page === pageNumber);
@@ -102,7 +102,7 @@ export function PDFViewer({
             variant="outline"
             size="sm"
             onClick={zoomOut}
-            disabled={scale <= 0.5}
+            disabled={scale <= 0.3}
           >
             <ZoomOut className="h-4 w-4" />
           </Button>
@@ -111,7 +111,7 @@ export function PDFViewer({
             variant="outline"
             size="sm"
             onClick={zoomIn}
-            disabled={scale >= 3.0}
+            disabled={scale >= 2.0}
           >
             <ZoomIn className="h-4 w-4" />
           </Button>
