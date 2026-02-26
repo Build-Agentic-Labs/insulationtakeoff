@@ -59,8 +59,8 @@ export default function ClientsPage() {
       );
 
       setClients(clientsWithCounts);
-    } catch (error) {
-      console.error('Error loading clients:', error);
+    } catch (error: any) {
+      console.error('Error loading clients:', error?.message || String(error));
     } finally {
       setIsLoading(false);
     }

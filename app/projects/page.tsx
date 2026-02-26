@@ -52,8 +52,8 @@ export default function ProjectsPage() {
 
       if (error) throw error;
       setProjects(data || []);
-    } catch (error) {
-      console.error('Error loading projects:', error);
+    } catch (error: any) {
+      console.error('Error loading projects:', error?.message || String(error));
     } finally {
       setIsLoading(false);
     }

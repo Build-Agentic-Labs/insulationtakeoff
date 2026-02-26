@@ -74,8 +74,8 @@ function NewProjectContent() {
 
       if (error) throw error;
       setClients(data || []);
-    } catch (err) {
-      console.error('Error loading clients:', err);
+    } catch (err: any) {
+      console.error('Error loading clients:', err?.message || String(err));
     } finally {
       setIsLoadingClients(false);
     }
