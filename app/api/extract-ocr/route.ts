@@ -38,7 +38,11 @@ export async function POST(request: NextRequest) {
     // In-progress guard: prevent double-fire
     if (project.status === 'extracting') {
       return NextResponse.json(
-        { error: 'Extraction already in progress for this project.' },
+        {
+          error: 'Extraction already in progress for this project.',
+          project_status: 'extracting',
+          project_id: projectId,
+        },
         { status: 409 }
       );
     }
