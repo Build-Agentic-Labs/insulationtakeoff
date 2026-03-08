@@ -18,6 +18,9 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/$
 
 type OcrOutcome = 'none' | 'complete' | 'review' | 'failed';
 
+const DEFAULT_MODE: 'vision' | 'ocr' =
+  (process.env.NEXT_PUBLIC_DEFAULT_EXTRACTION_MODE as 'vision' | 'ocr') || 'ocr';
+
 export default function ExtractPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -29,7 +32,7 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [autoStarted, setAutoStarted] = useState(false);
-  const [extractionMode, setExtractionMode] = useState<'vision' | 'ocr'>('ocr');
+  const [extractionMode, setExtractionMode] = useState<'vision' | 'ocr'>(DEFAULT_MODE);
 
   // M8.2: OCR outcome branching + Vision fallback
   const [ocrOutcome, setOcrOutcome] = useState<OcrOutcome>('none');

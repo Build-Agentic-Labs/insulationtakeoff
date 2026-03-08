@@ -25,6 +25,11 @@ import {
   X,
   Download,
   Plus,
+  Activity,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Clock,
 } from 'lucide-react';
 
 interface Project {
@@ -76,10 +81,20 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  const [latestRun, setLatestRun] = useState<{
+    id: string;
+    mode: string;
+    status: string;
+    started_at: string;
+    finished_at: string | null;
+    has_metrics: boolean;
+    metrics_json: any;
+  } | null>(null);
 
   useEffect(() => {
     loadProject();
     loadDocuments();
+    loadLatestRun();
   }, [id]);
 
   const loadProject = async () => {
@@ -111,6 +126,18 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       }
     } catch (error) {
       console.error('Error loading documents:', error);
+    }
+  };
+
+  const loadLatestRun = async () => {
+    try {
+      const response = await fetch(`/api/extraction-runs?projectId=${id}&limit=1`);
+      const data = await response.json();
+      if (data.runs?.length > 0) {
+        setLatestRun(data.runs[0]);
+      }
+    } catch (error) {
+      // Non-critical — don't block page load
     }
   };
 
@@ -346,6 +373,53 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           </div>
         </CardContent>
       </Card>
+
+      {/* Latest Extraction Run */}
+      {latestRun && (
+        <Card className="mb-6 border-zinc-200 dark:border-zinc-700 shadow-sm">
+          <CardContent className="py-3 px-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
+                  latestRun.status === 'complete' ? 'bg-green-100 dark:bg-green-900/30' :
+                  latestRun.status === 'review' ? 'bg-amber-100 dark:bg-amber-900/30' :
+                  latestRun.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30' :
+                  'bg-zinc-100 dark:bg-zinc-800'
+                }`}>
+                  {latestRun.status === 'complete' ? <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" /> :
+                   latestRun.status === 'review' ? <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" /> :
+                   latestRun.status === 'failed' ? <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" /> :
+                   <Clock className="h-4 w-4 text-zinc-500" />}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-zinc-900 dark:text-white">
+                    Latest: {latestRun.mode.toUpperCase()} extraction
+                    <span className={`ml-2 text-xs font-semibold uppercase px-1.5 py-0.5 rounded ${
+                      latestRun.status === 'complete' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                      latestRun.status === 'review' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
+                      latestRun.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                      'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
+                    }`}>
+                      {latestRun.status}
+                    </span>
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {latestRun.finished_at
+                      ? new Date(latestRun.finished_at).toLocaleString()
+                      : 'In progress...'}
+                    {latestRun.has_metrics && latestRun.metrics_json?.agreement_score != null && (
+                      <span className="ml-2">
+                        Agreement: {Math.round(latestRun.metrics_json.agreement_score * 100)}%
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <Activity className="h-4 w-4 text-zinc-400" />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Action Cards */}
       <div className={`grid gap-4 mb-6 ${project.status === 'manual' || !project.pdf_url ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
