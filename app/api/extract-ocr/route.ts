@@ -35,6 +35,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Project has no PDF uploaded' }, { status: 400 });
     }
 
+    // In-progress guard: prevent double-fire
+    if (project.status === 'extracting') {
+      return NextResponse.json(
+        { error: 'Extraction already in progress for this project.' },
+        { status: 409 }
+      );
+    }
+
     // If no documentId provided, find the first document for this project
     if (!documentId) {
       const { data: docs } = await supabaseAdmin

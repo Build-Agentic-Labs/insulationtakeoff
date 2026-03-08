@@ -20,14 +20,17 @@ const ANALYSIS_STEPS: AnalysisStep[] = [
   { label: 'Finalizing insulation data', detail: 'Net wall SF, ceiling SF, floor SF, stud size confirmed...' },
 ];
 
+type OcrOutcome = 'none' | 'complete' | 'review' | 'failed';
+
 interface AnalysisPanelProps {
   isActive: boolean;
   isComplete: boolean;
   hasError: boolean;
   errorMessage?: string;
+  ocrOutcome?: OcrOutcome;
 }
 
-export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage }: AnalysisPanelProps) {
+export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage, ocrOutcome = 'none' }: AnalysisPanelProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [visibleMessages, setVisibleMessages] = useState<number[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -82,11 +85,16 @@ export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage }: 
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [visibleMessages]);
 
-  if (!isActive && !isComplete && !hasError) return null;
+  if (!isActive && !isComplete && !hasError && ocrOutcome === 'none') return null;
+
+  const isOcrReview = ocrOutcome === 'review';
+  const isOcrFailed = ocrOutcome === 'failed';
 
   const progressPercent = isComplete
     ? 100
-    : Math.round((currentStep / ANALYSIS_STEPS.length) * 100);
+    : isOcrReview
+      ? 100
+      : Math.round((currentStep / ANALYSIS_STEPS.length) * 100);
 
   return (
     <div className="flex flex-col h-full bg-zinc-900/95 backdrop-blur-sm">
@@ -101,9 +109,13 @@ export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage }: 
             <p className="text-xs text-zinc-500">
               {isComplete
                 ? 'Extraction complete'
-                : hasError
-                  ? 'Extraction failed'
-                  : 'Analyzing document...'}
+                : isOcrReview
+                  ? 'OCR finished — review recommended'
+                  : isOcrFailed
+                    ? 'OCR could not complete'
+                    : hasError
+                      ? 'Extraction failed'
+                      : 'Analyzing document...'}
             </p>
           </div>
         </div>
@@ -114,11 +126,13 @@ export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage }: 
             className="h-full rounded-full transition-all duration-700 ease-out"
             style={{
               width: `${progressPercent}%`,
-              background: hasError
+              background: hasError || isOcrFailed
                 ? 'rgb(239, 68, 68)'
                 : isComplete
                   ? 'rgb(34, 197, 94)'
-                  : 'linear-gradient(90deg, rgb(34, 211, 238), rgb(59, 130, 246))',
+                  : isOcrReview
+                    ? 'rgb(245, 158, 11)'
+                    : 'linear-gradient(90deg, rgb(34, 211, 238), rgb(59, 130, 246))',
             }}
           />
         </div>
@@ -173,16 +187,32 @@ export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage }: 
           </div>
         )}
 
-        {hasError && (
+        {hasError && !isOcrReview && (
           <div className="animate-fade-in-up mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
             <p className="text-sm text-red-300 font-medium">
-              Extraction failed
+              {isOcrFailed ? 'OCR could not complete' : 'Extraction failed'}
             </p>
             {errorMessage && (
               <p className="text-xs text-red-400/70 mt-1">
                 {errorMessage}
               </p>
             )}
+            {isOcrFailed && (
+              <p className="text-xs text-zinc-500 mt-2">
+                Use the buttons above to retry OCR or try Vision extraction.
+              </p>
+            )}
+          </div>
+        )}
+
+        {isOcrReview && (
+          <div className="animate-fade-in-up mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <p className="text-sm text-amber-300 font-medium">
+              OCR finished — needs review
+            </p>
+            <p className="text-xs text-amber-400/70 mt-1">
+              Scope data extracted but some fields need verification. You can go to review or run Vision to cross-check.
+            </p>
           </div>
         )}
 

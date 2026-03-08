@@ -6,13 +6,17 @@ import { supabase } from '@/lib/supabase/client';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { ScanningOverlay } from '@/components/extraction/ScanningOverlay';
 import { AnalysisPanel } from '@/components/extraction/AnalysisPanel';
+import { ScopeCard } from '@/components/extraction/ScopeCard';
 import { Button } from '@/components/ui/button';
-import { Loader2, ArrowLeft, Play, Lightbulb } from 'lucide-react';
+import { Loader2, ArrowLeft, Lightbulb, Eye, RotateCcw, ArrowRight } from 'lucide-react';
 import { DemoTooltip } from '@/components/demo/DemoTooltip';
+import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+
+type OcrOutcome = 'none' | 'complete' | 'review' | 'failed';
 
 export default function ExtractPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -25,7 +29,12 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [autoStarted, setAutoStarted] = useState(false);
-  const [extractionMode, setExtractionMode] = useState<'vision' | 'ocr'>('vision');
+  const [extractionMode, setExtractionMode] = useState<'vision' | 'ocr'>('ocr');
+
+  // M8.2: OCR outcome branching + Vision fallback
+  const [ocrOutcome, setOcrOutcome] = useState<OcrOutcome>('none');
+  const [envelope, setEnvelope] = useState<TakeoffEnvelopeV1 | null>(null);
+  const [lastIdempotencyKey, setLastIdempotencyKey] = useState<string | null>(null);
 
   // PDF state
   const [numPages, setNumPages] = useState(0);
@@ -92,21 +101,29 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     }
   };
 
-  const startExtraction = async () => {
+  const startExtraction = async (opts?: { forceNewKey?: boolean; modeOverride?: 'vision' | 'ocr' }) => {
+    const mode = opts?.modeOverride ?? extractionMode;
     setIsExtracting(true);
     setHasError(false);
     setErrorMessage('');
+    setOcrOutcome('none');
+    setEnvelope(null);
+
+    // Generate idempotency key (reuse on resume, new on retry/fresh)
+    const idempotencyKey =
+      (!opts?.forceNewKey && lastIdempotencyKey) ? lastIdempotencyKey : crypto.randomUUID();
+    setLastIdempotencyKey(idempotencyKey);
 
     try {
-      const endpoint = extractionMode === 'ocr' ? '/api/extract-ocr' : '/api/extract';
+      const endpoint = mode === 'ocr' ? '/api/extract-ocr' : '/api/extract';
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: id }),
+        body: JSON.stringify({ projectId: id, idempotencyKey }),
       });
 
       const text = await response.text();
-      let data;
+      let data: any;
       try {
         data = JSON.parse(text);
       } catch {
@@ -114,19 +131,53 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
       }
 
       if (!response.ok) {
+        if (response.status === 409) {
+          throw new Error(data.error || 'Extraction already in progress.');
+        }
         throw new Error(data.error || 'Extraction failed');
       }
 
-      setIsComplete(true);
+      // Capture envelope if present (OCR mode)
+      const env: TakeoffEnvelopeV1 | null = data.takeoff_envelope ?? null;
+      if (env) {
+        setEnvelope(env);
+      }
+
       setIsExtracting(false);
 
       if (pageIntervalRef.current) {
         clearInterval(pageIntervalRef.current);
       }
 
-      setTimeout(() => {
-        router.push(`/projects/${id}/review`);
-      }, 2000);
+      // Branch on OCR outcome
+      if (mode === 'ocr' && env) {
+        if (env.status === 'complete') {
+          setOcrOutcome('complete');
+          setIsComplete(true);
+          setTimeout(() => router.push(`/projects/${id}/review`), 1200);
+          return;
+        }
+
+        if (env.status === 'review') {
+          setOcrOutcome('review');
+          // Stay on page — user chooses next step
+          return;
+        }
+
+        // failed
+        setOcrOutcome('failed');
+        setHasError(true);
+        setErrorMessage(
+          env.errors?.[0]?.message
+            || env.completeness?.degradation_reason
+            || 'OCR could not complete extraction'
+        );
+        return;
+      }
+
+      // Vision mode (or OCR without envelope)
+      setIsComplete(true);
+      setTimeout(() => router.push(`/projects/${id}/review`), 1200);
     } catch (err) {
       setHasError(true);
       setErrorMessage(err instanceof Error ? err.message : 'Extraction failed');
@@ -141,7 +192,17 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     setHasError(false);
     setErrorMessage('');
     setIsComplete(false);
-    startExtraction();
+    setOcrOutcome('none');
+    startExtraction({ forceNewKey: true });
+  };
+
+  const handleVisionFallback = () => {
+    setHasError(false);
+    setErrorMessage('');
+    setIsComplete(false);
+    setOcrOutcome('none');
+    setExtractionMode('vision');
+    startExtraction({ forceNewKey: true, modeOverride: 'vision' });
   };
 
   const [pdfError, setPdfError] = useState(false);
@@ -190,7 +251,7 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
               Our AI is analyzing your document page-by-page, extracting room dimensions, wall measurements, door counts, and window counts. This typically takes 15-30 seconds.
             </DemoTooltip>
           </div>
-          {!isExtracting && !isComplete && (
+          {!isExtracting && !isComplete && ocrOutcome === 'none' && !hasError && (
             <div className="flex items-center gap-1 bg-zinc-800 rounded-lg p-0.5">
               <button
                 onClick={() => setExtractionMode('vision')}
@@ -216,16 +277,63 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
           )}
         </div>
 
-        {hasError && (
-          <Button
-            size="sm"
-            onClick={handleRetry}
-            className="bg-cyan-600 hover:bg-cyan-700 text-white"
-          >
-            <Play className="h-3 w-3 mr-2" />
-            Retry
-          </Button>
-        )}
+        {/* Action buttons based on outcome */}
+        <div className="flex items-center gap-2">
+          {hasError && ocrOutcome !== 'failed' && (
+            <Button
+              size="sm"
+              onClick={handleRetry}
+              className="bg-cyan-600 hover:bg-cyan-700 text-white"
+            >
+              <RotateCcw className="h-3 w-3 mr-2" />
+              Retry
+            </Button>
+          )}
+
+          {ocrOutcome === 'failed' && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRetry}
+                className="border-zinc-700 text-zinc-300 hover:text-white"
+              >
+                <RotateCcw className="h-3 w-3 mr-2" />
+                Retry OCR
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleVisionFallback}
+                className="bg-cyan-600 hover:bg-cyan-700 text-white"
+              >
+                <Eye className="h-3 w-3 mr-2" />
+                Try Vision
+              </Button>
+            </>
+          )}
+
+          {ocrOutcome === 'review' && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => router.push(`/projects/${id}/review`)}
+                className="border-zinc-700 text-zinc-300 hover:text-white"
+              >
+                <ArrowRight className="h-3 w-3 mr-2" />
+                Go to Review
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleVisionFallback}
+                className="bg-cyan-600 hover:bg-cyan-700 text-white"
+              >
+                <Eye className="h-3 w-3 mr-2" />
+                Run Vision to cross-check
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Full-screen PDF with floating overlay */}
@@ -293,8 +401,16 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
             isComplete={isComplete}
             hasError={hasError}
             errorMessage={errorMessage}
+            ocrOutcome={ocrOutcome}
           />
         </div>
+
+        {/* ScopeCard panel when OCR returns review — bottom left */}
+        {ocrOutcome === 'review' && envelope && (
+          <div className="absolute bottom-4 left-4 z-20 w-96 max-h-[60%] overflow-auto rounded-xl shadow-2xl shadow-black/50">
+            <ScopeCard envelope={envelope} />
+          </div>
+        )}
       </div>
     </div>
   );

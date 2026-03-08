@@ -79,6 +79,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // In-progress guard: prevent double-fire
+    if (project.status === 'extracting') {
+      return NextResponse.json(
+        { error: 'Extraction already in progress for this project.' },
+        { status: 409 }
+      );
+    }
+
     // Update project status
     await supabaseAdmin
       .from('projects')
