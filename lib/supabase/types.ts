@@ -89,6 +89,7 @@ export interface Database {
           file_type: string | null
           file_size: number | null
           created_at: string
+          takeoff_envelope: Json | null
         }
         Insert: {
           id?: string
@@ -98,6 +99,7 @@ export interface Database {
           file_type?: string | null
           file_size?: number | null
           created_at?: string
+          takeoff_envelope?: Json | null
         }
         Update: {
           id?: string
@@ -107,6 +109,7 @@ export interface Database {
           file_type?: string | null
           file_size?: number | null
           created_at?: string
+          takeoff_envelope?: Json | null
         }
         Relationships: [
           {

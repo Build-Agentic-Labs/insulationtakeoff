@@ -32,6 +32,8 @@ import {
 } from 'lucide-react';
 import { DemoInstructions } from '@/components/demo/DemoInstructions';
 import { DemoTooltip } from '@/components/demo/DemoTooltip';
+import { ScopeCard } from '@/components/extraction/ScopeCard';
+import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 
 // ─── Interfaces ─────────────────────────────────────────────
 
@@ -188,6 +190,9 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const [editingRoom, setEditingRoom] = useState<string | null>(null);
   const [roomsExpanded, setRoomsExpanded] = useState(false);
 
+  // Takeoff envelope from pdfengine (if OCR extraction was used)
+  const [envelope, setEnvelope] = useState<TakeoffEnvelopeV1 | null>(null);
+
   // Segment verification (UI-only, not persisted)
   const [verifiedSegments, setVerifiedSegments] = useState<Set<string>>(new Set());
 
@@ -257,6 +262,19 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
       console.log('Openings loaded:', openingsData);
       setOpenings(openingsData || []);
+
+      // Load takeoff envelope from documents (pdfengine OCR)
+      const { data: docsData } = await supabase
+        .from('documents')
+        .select('takeoff_envelope')
+        .eq('project_id', id)
+        .not('takeoff_envelope', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (docsData?.[0]?.takeoff_envelope) {
+        setEnvelope(docsData[0].takeoff_envelope as unknown as TakeoffEnvelopeV1);
+      }
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -686,6 +704,22 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                   <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
                 )}
               </div>
+
+              {/* ── Scope Card (pdfengine envelope) ── */}
+              {envelope && (
+                <ScopeCard
+                  envelope={envelope}
+                  onDownload={() => {
+                    const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `takeoff_${id}_v1.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                />
+              )}
 
               {/* ── Segment 1: Exterior Walls ── */}
               <SegmentCard

@@ -9,9 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatCurrency, formatSqft } from '@/lib/calculations/pricing';
-import { FileText, Download, Mail, Loader2, AlertCircle, Settings, Plus, Trash2, Check } from 'lucide-react';
+import { FileText, Download, Mail, Loader2, AlertCircle, Settings, Plus, Trash2, Check, Layers } from 'lucide-react';
 import { DemoInstructions } from '@/components/demo/DemoInstructions';
 import { DemoTooltip } from '@/components/demo/DemoTooltip';
+import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 
 // ─── Interfaces ─────────────────────────────────────────────
 
@@ -161,6 +162,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
 
   // Per-project insulation areas configuration
   const [insulationAreas, setInsulationAreas] = useState<InsulationArea[]>([]);
+  const [envelope, setEnvelope] = useState<TakeoffEnvelopeV1 | null>(null);
 
   useEffect(() => {
     loadData();
@@ -196,8 +198,23 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       const pricing = (pricingData?.value || DEFAULT_PRICING) as GlobalPricing;
       setGlobalPricing(pricing);
 
+      // Load takeoff envelope from documents (pdfengine OCR)
+      let loadedEnvelope: TakeoffEnvelopeV1 | null = null;
+      const { data: docsData } = await supabase
+        .from('documents')
+        .select('takeoff_envelope')
+        .eq('project_id', id)
+        .not('takeoff_envelope', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (docsData?.[0]?.takeoff_envelope) {
+        loadedEnvelope = docsData[0].takeoff_envelope as unknown as TakeoffEnvelopeV1;
+        setEnvelope(loadedEnvelope);
+      }
+
       // Calculate available areas based on extracted data
-      initializeInsulationAreas(loadedRooms, pricing);
+      initializeInsulationAreas(loadedRooms, pricing, loadedEnvelope);
 
       // Load existing quote
       const { data: quoteData } = await supabase
@@ -222,7 +239,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
     }
   };
 
-  const initializeInsulationAreas = (loadedRooms: Room[], pricing: GlobalPricing) => {
+  const initializeInsulationAreas = (loadedRooms: Room[], pricing: GlobalPricing, env?: TakeoffEnvelopeV1 | null) => {
     const areas: InsulationArea[] = [];
 
     // Calculate living area totals
@@ -237,15 +254,17 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       }
     }
 
-    // Attic/Ceiling - use attic rooms or fall back to living area
+    // Attic/Ceiling - prefer envelope, then attic rooms, then living area
+    const envCeiling = env?.summary?.estimated_ceiling_sf || 0;
     const atticRooms = loadedRooms.filter((r) => r.type === 'attic');
     const totalAtticArea = atticRooms.reduce((sum, r) => sum + (r.area_sqft || 0), 0);
-    const ceilingArea = totalAtticArea > 0 ? totalAtticArea : totalLivingArea;
+    const ceilingArea = envCeiling > 0 ? envCeiling : (totalAtticArea > 0 ? totalAtticArea : totalLivingArea);
+    const ceilingSource = envCeiling > 0 ? ' (pdfengine)' : '';
 
     if (ceilingArea > 0) {
       areas.push({
         id: 'attic_ceiling',
-        name: 'Attic/Ceiling Insulation',
+        name: `Attic/Ceiling Insulation${ceilingSource}`,
         description: `${formatSqft(ceilingArea)} sq ft of ceiling area`,
         enabled: true,
         rValue: null,
@@ -316,11 +335,22 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       });
     }
 
-    // Crawlspace/Floor
+    // Crawlspace/Floor - prefer envelope, then crawlspace rooms, then living area
+    const envCrawlspace = env?.summary?.estimated_crawlspace_sf || 0;
     const crawlspaceRooms = loadedRooms.filter((r) => r.type === 'crawlspace');
     const totalCrawlspaceArea = crawlspaceRooms.reduce((sum, r) => sum + (r.area_sqft || 0), 0);
 
-    if (totalCrawlspaceArea > 0) {
+    if (envCrawlspace > 0) {
+      areas.push({
+        id: 'crawlspace_floor',
+        name: 'Crawlspace/Floor Insulation (pdfengine)',
+        description: `${formatSqft(envCrawlspace)} sq ft from OCR pipeline`,
+        enabled: true,
+        rValue: null,
+        sqft: envCrawlspace,
+        pricePerSqft: pricing.floor_per_sqft,
+      });
+    } else if (totalCrawlspaceArea > 0) {
       areas.push({
         id: 'crawlspace_floor',
         name: 'Crawlspace/Floor Insulation',
@@ -331,7 +361,6 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
         pricePerSqft: pricing.floor_per_sqft,
       });
     } else if (totalLivingArea > 0) {
-      // Option to add floor insulation based on living area
       areas.push({
         id: 'crawlspace_floor',
         name: 'Floor Insulation',
@@ -339,6 +368,36 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
         enabled: false,
         rValue: null,
         sqft: totalLivingArea,
+        pricePerSqft: pricing.floor_per_sqft,
+      });
+    }
+
+    // Garage Ceiling — from envelope only (not available from rooms)
+    const envGarageCeiling = env?.summary?.estimated_garage_ceiling_sf || 0;
+    if (envGarageCeiling > 0) {
+      areas.push({
+        id: 'garage_ceiling',
+        name: 'Garage Ceiling Insulation (pdfengine)',
+        description: `${formatSqft(envGarageCeiling)} sq ft from OCR pipeline`,
+        enabled: false,
+        rValue: null,
+        sqft: envGarageCeiling,
+        pricePerSqft: pricing.attic_per_sqft,
+      });
+    }
+
+    // Rim Joist — from envelope only
+    const envRimJoist = env?.summary?.estimated_rim_joist_lf || 0;
+    if (envRimJoist > 0) {
+      // Rim joist is LF × ~1ft height = SF for insulation purposes
+      const rimJoistSf = Math.round(envRimJoist);
+      areas.push({
+        id: 'rim_joist',
+        name: 'Rim Joist Insulation (pdfengine)',
+        description: `${Math.round(envRimJoist)} LF from OCR pipeline`,
+        enabled: false,
+        rValue: null,
+        sqft: rimJoistSf,
         pricePerSqft: pricing.floor_per_sqft,
       });
     }
@@ -867,6 +926,12 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
               <Card>
                 <CardHeader>
                   <CardTitle>Quote Preview</CardTitle>
+                  {envelope && (
+                    <p className="text-xs text-cyan-500 flex items-center gap-1 mt-1">
+                      <Layers className="h-3 w-3" />
+                      Scope values sourced from pdfengine OCR
+                    </p>
+                  )}
                 </CardHeader>
                 <CardContent>
                   {validationErrors.length > 0 && (

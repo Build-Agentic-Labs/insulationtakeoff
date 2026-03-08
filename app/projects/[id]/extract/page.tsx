@@ -25,6 +25,7 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [autoStarted, setAutoStarted] = useState(false);
+  const [extractionMode, setExtractionMode] = useState<'vision' | 'ocr'>('vision');
 
   // PDF state
   const [numPages, setNumPages] = useState(0);
@@ -97,7 +98,8 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     setErrorMessage('');
 
     try {
-      const response = await fetch('/api/extract', {
+      const endpoint = extractionMode === 'ocr' ? '/api/extract-ocr' : '/api/extract';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: id }),
@@ -188,6 +190,30 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
               Our AI is analyzing your document page-by-page, extracting room dimensions, wall measurements, door counts, and window counts. This typically takes 15-30 seconds.
             </DemoTooltip>
           </div>
+          {!isExtracting && !isComplete && (
+            <div className="flex items-center gap-1 bg-zinc-800 rounded-lg p-0.5">
+              <button
+                onClick={() => setExtractionMode('vision')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  extractionMode === 'vision'
+                    ? 'bg-cyan-600 text-white'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Vision
+              </button>
+              <button
+                onClick={() => setExtractionMode('ocr')}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  extractionMode === 'ocr'
+                    ? 'bg-cyan-600 text-white'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                OCR
+              </button>
+            </div>
+          )}
         </div>
 
         {hasError && (
