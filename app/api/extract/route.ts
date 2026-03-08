@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { startOrReturnRun, finishRun } from '@/lib/supabase/extractionRuns';
+import { computeComparisonMetrics } from '@/lib/comparison/computeMetrics';
 import { analyzePDF } from '@/lib/ai/claude-client';
 import { parseInsulationExtractionResponse, InsulationExtractionData } from '@/lib/ai/parsers';
 import { INSULATION_EXTRACTION_PROMPT } from '@/lib/ai/prompts';
@@ -176,8 +177,19 @@ export async function POST(request: NextRequest) {
     // Store extracted data in database
     await storeExtractedData(projectId, extractedData);
 
+    // Compute comparison metrics if OCR envelope exists (best-effort)
+    let metricsJson: Record<string, unknown> | undefined;
+    try {
+      const metrics = await computeComparisonMetrics(projectId, 'vision', runId);
+      if (metrics) {
+        metricsJson = metrics as unknown as Record<string, unknown>;
+      }
+    } catch (e) {
+      console.warn('Comparison metrics failed (non-blocking):', e);
+    }
+
     // Mark run as complete
-    await finishRun({ runId, status: 'complete' });
+    await finishRun({ runId, status: 'complete', metricsJson });
 
     // Update project status
     await supabaseAdmin

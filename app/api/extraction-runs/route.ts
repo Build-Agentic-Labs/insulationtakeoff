@@ -22,6 +22,8 @@ export async function GET(request: NextRequest) {
       finished_at: r.finished_at,
       error: r.error,
       has_envelope: r.takeoff_envelope !== null,
+      has_metrics: r.metrics_json !== null,
+      metrics_json: r.metrics_json,
       created_at: r.created_at,
     })),
   });

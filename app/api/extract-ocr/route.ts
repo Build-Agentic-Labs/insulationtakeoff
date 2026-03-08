@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { startOrReturnRun, finishRun } from '@/lib/supabase/extractionRuns';
+import { computeComparisonMetrics } from '@/lib/comparison/computeMetrics';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 
 export const maxDuration = 120;
@@ -143,12 +144,26 @@ export async function POST(request: NextRequest) {
       : envelope.status === 'review' ? 'review'
       : 'failed';
 
+    // Compute comparison metrics if Vision data exists (best-effort)
+    let metricsJson: Record<string, unknown> | undefined;
+    if (runStatus !== 'failed') {
+      try {
+        const metrics = await computeComparisonMetrics(projectId, 'ocr', runId);
+        if (metrics) {
+          metricsJson = metrics as unknown as Record<string, unknown>;
+        }
+      } catch (e) {
+        console.warn('Comparison metrics failed (non-blocking):', e);
+      }
+    }
+
     // Persist to run row
     await finishRun({
       runId,
       status: runStatus,
       envelope,
       error: runStatus === 'failed' ? (envelope.errors?.[0]?.message || 'extraction failed') : undefined,
+      metricsJson,
     });
 
     // Persist envelope to documents table (on success or review, not failure)
