@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { startOrReturnRun, finishRun } from '@/lib/supabase/extractionRuns';
 import { analyzePDF } from '@/lib/ai/claude-client';
 import { parseInsulationExtractionResponse, InsulationExtractionData } from '@/lib/ai/parsers';
 import { INSULATION_EXTRACTION_PROMPT } from '@/lib/ai/prompts';
@@ -48,8 +49,11 @@ function getMockExtractionData(): InsulationExtractionData {
 
 export async function POST(request: NextRequest) {
   let projectId: string | undefined;
+  let runId: string | undefined;
   try {
-    ({ projectId } = await request.json());
+    const body = await request.json();
+    projectId = body.projectId;
+    const idempotencyKey: string = body.idempotencyKey || crypto.randomUUID();
 
     if (!projectId) {
       return NextResponse.json(
@@ -79,11 +83,48 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // In-progress guard: prevent double-fire
-    if (project.status === 'extracting') {
+    // Find document for this project
+    const { data: docs } = await supabaseAdmin
+      .from('documents')
+      .select('id')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const documentId = docs?.[0]?.id;
+
+    if (!documentId) {
+      return NextResponse.json(
+        { error: 'No document found for project' },
+        { status: 400 }
+      );
+    }
+
+    // Idempotency: check or create run
+    const { run, isExisting } = await startOrReturnRun({
+      projectId,
+      documentId,
+      mode: 'vision',
+      idempotencyKey,
+      requestJson: { pdf_url: project.pdf_url, mode: 'vision' },
+    });
+    runId = run.id;
+
+    // If run already exists and is finished, return cached result
+    if (isExisting && run.finished_at) {
+      return NextResponse.json({
+        success: true,
+        run_id: run.id,
+        data: null,
+        cached: true,
+      });
+    }
+
+    // If run exists and is still in progress, return 409
+    if (isExisting && !run.finished_at) {
       return NextResponse.json(
         {
           error: 'Extraction already in progress for this project.',
+          run_id: run.id,
           project_status: 'extracting',
           project_id: projectId,
         },
@@ -135,6 +176,9 @@ export async function POST(request: NextRequest) {
     // Store extracted data in database
     await storeExtractedData(projectId, extractedData);
 
+    // Mark run as complete
+    await finishRun({ runId, status: 'complete' });
+
     // Update project status
     await supabaseAdmin
       .from('projects')
@@ -143,10 +187,20 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      run_id: runId,
       data: extractedData,
     });
   } catch (error) {
     console.error('Extraction error:', error);
+
+    // Mark run as failed
+    if (runId) {
+      await finishRun({
+        runId,
+        status: 'failed',
+        error: error instanceof Error ? error.message : 'Vision extraction failed',
+      }).catch(() => {});
+    }
 
     // Fall back to mock data so the user can continue with the estimate
     try {
@@ -158,14 +212,14 @@ export async function POST(request: NextRequest) {
           .from('projects')
           .update({ status: 'reviewing' })
           .eq('id', projectId);
-        return NextResponse.json({ success: true, data: mockData, mock: true });
+        return NextResponse.json({ success: true, data: mockData, mock: true, run_id: runId });
       }
     } catch (fallbackError) {
       console.error('Mock data fallback also failed:', fallbackError);
     }
 
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { error: error instanceof Error ? error.message : 'Internal server error', run_id: runId },
       { status: 500 }
     );
   }

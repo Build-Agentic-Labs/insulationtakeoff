@@ -137,7 +137,10 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
         throw new Error(data.error || 'Extraction failed');
       }
 
-      // Capture envelope if present (OCR mode)
+      // Capture run_id + envelope if present
+      if (data.run_id) {
+        console.log('Extraction run:', data.run_id, data.cached ? '(cached)' : '');
+      }
       const env: TakeoffEnvelopeV1 | null = data.takeoff_envelope ?? null;
       if (env) {
         setEnvelope(env);

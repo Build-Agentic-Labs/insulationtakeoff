@@ -303,6 +303,75 @@ export interface Database {
           }
         ]
       }
+      extraction_runs: {
+        Row: {
+          id: string
+          project_id: string
+          document_id: string
+          mode: 'ocr' | 'vision'
+          idempotency_key: string
+          status: 'started' | 'complete' | 'review' | 'failed'
+          attempt: number
+          started_at: string
+          finished_at: string | null
+          error: string | null
+          takeoff_envelope: Json | null
+          metrics_json: Json | null
+          request_json: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          project_id: string
+          document_id: string
+          mode: 'ocr' | 'vision'
+          idempotency_key: string
+          status?: 'started' | 'complete' | 'review' | 'failed'
+          attempt?: number
+          started_at?: string
+          finished_at?: string | null
+          error?: string | null
+          takeoff_envelope?: Json | null
+          metrics_json?: Json | null
+          request_json?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          project_id?: string
+          document_id?: string
+          mode?: 'ocr' | 'vision'
+          idempotency_key?: string
+          status?: 'started' | 'complete' | 'review' | 'failed'
+          attempt?: number
+          started_at?: string
+          finished_at?: string | null
+          error?: string | null
+          takeoff_envelope?: Json | null
+          metrics_json?: Json | null
+          request_json?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_runs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_runs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       settings: {
         Row: {
           id: string
