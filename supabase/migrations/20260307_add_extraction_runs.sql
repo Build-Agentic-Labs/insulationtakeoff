@@ -26,3 +26,14 @@ CREATE INDEX IF NOT EXISTS idx_extraction_runs_project_created
 COMMENT ON TABLE extraction_runs IS 'Audit trail for extraction attempts. Idempotency enforced by (project_id, idempotency_key).';
 COMMENT ON COLUMN extraction_runs.metrics_json IS 'Future: OCR vs Vision comparison metrics, quality scores, etc.';
 COMMENT ON COLUMN extraction_runs.request_json IS 'Capture of request params: mode, page overrides, plan_name, etc.';
+
+-- RLS: match existing pattern (open access, auth added later)
+ALTER TABLE extraction_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all access to extraction_runs" ON extraction_runs
+  FOR ALL USING (true) WITH CHECK (true);
+
+-- Auto-update updated_at (reuse existing trigger function from 001)
+CREATE TRIGGER update_extraction_runs_updated_at
+  BEFORE UPDATE ON extraction_runs
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
