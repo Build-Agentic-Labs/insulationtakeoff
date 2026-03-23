@@ -7,10 +7,12 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import { ScanningOverlay } from '@/components/extraction/ScanningOverlay';
 import { AnalysisPanel } from '@/components/extraction/AnalysisPanel';
 import { ScopeCard } from '@/components/extraction/ScopeCard';
+import { TakeoffResults } from '@/components/extraction/TakeoffResults';
 import { Button } from '@/components/ui/button';
 import { Loader2, ArrowLeft, Lightbulb, Eye, RotateCcw, ArrowRight } from 'lucide-react';
 import { DemoTooltip } from '@/components/demo/DemoTooltip';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
+import { PLAN_PRESETS, detectPlanPreset } from '@/lib/constants/planPresets';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -39,6 +41,10 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
   const [envelope, setEnvelope] = useState<TakeoffEnvelopeV1 | null>(null);
   const [lastIdempotencyKey, setLastIdempotencyKey] = useState<string | null>(null);
 
+  // Plan preset
+  const [planPreset, setPlanPreset] = useState<string | null>(null);
+  const [detectedPreset, setDetectedPreset] = useState<string | null>(null);
+
   // PDF state
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -64,10 +70,12 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
   }, []);
 
   // Auto-start extraction once project loads
+  // Pass project.plan_preset directly to avoid race condition —
+  // planPreset state isn't populated yet when this effect fires.
   useEffect(() => {
     if (project && !autoStarted && !isExtracting && !isComplete) {
       setAutoStarted(true);
-      startExtraction();
+      startExtraction({ planNameOverride: project.plan_preset || undefined });
     }
   }, [project]);
 
@@ -96,6 +104,18 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
         .select('*')
         .eq('id', id)
         .single();
+      // Auto-detect and persist preset before setting project,
+      // so the auto-start effect sees it on project.plan_preset.
+      if (!data?.plan_preset && data?.name) {
+        const detected = detectPlanPreset(data.name);
+        if (detected) {
+          data.plan_preset = detected;
+          setPlanPreset(detected);
+          supabase.from('projects').update({ plan_preset: detected }).eq('id', id);
+        }
+      } else if (data?.plan_preset) {
+        setPlanPreset(data.plan_preset);
+      }
       setProject(data);
     } catch (err) {
       console.error('Error loading project:', err);
@@ -104,8 +124,9 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     }
   };
 
-  const startExtraction = async (opts?: { forceNewKey?: boolean; modeOverride?: 'vision' | 'ocr' }) => {
+  const startExtraction = async (opts?: { forceNewKey?: boolean; modeOverride?: 'vision' | 'ocr'; planNameOverride?: string }) => {
     const mode = opts?.modeOverride ?? extractionMode;
+    const effectivePlanName = opts?.planNameOverride ?? planPreset ?? undefined;
     setIsExtracting(true);
     setHasError(false);
     setErrorMessage('');
@@ -119,10 +140,11 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
 
     try {
       const endpoint = mode === 'ocr' ? '/api/extract-ocr' : '/api/extract';
+      console.log('[EXTRACT] Sending request:', { projectId: id, idempotencyKey, planName: effectivePlanName, mode });
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: id, idempotencyKey }),
+        body: JSON.stringify({ projectId: id, idempotencyKey, planName: effectivePlanName }),
       });
 
       const text = await response.text();
@@ -142,7 +164,15 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
 
       // Capture run_id + envelope if present
       if (data.run_id) {
-        console.log('Extraction run:', data.run_id, data.cached ? '(cached)' : '');
+        console.log('[EXTRACT] Response:', {
+          run_id: data.run_id,
+          cached: !!data.cached,
+          status: data.takeoff_envelope?.status,
+          gross_sf: data.takeoff_envelope?.summary?.gross_sf,
+          page_source: data.takeoff_envelope?.page_selection?.source,
+          selected_page: data.takeoff_envelope?.page_selection?.selected_page_index,
+          planName: effectivePlanName,
+        });
       }
       const env: TakeoffEnvelopeV1 | null = data.takeoff_envelope ?? null;
       if (env) {
@@ -187,6 +217,9 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     } catch (err) {
       setHasError(true);
       setErrorMessage(err instanceof Error ? err.message : 'Extraction failed');
+      if (mode === 'ocr') {
+        setOcrOutcome('failed');
+      }
       setIsExtracting(false);
       if (pageIntervalRef.current) {
         clearInterval(pageIntervalRef.current);
@@ -209,6 +242,21 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     setOcrOutcome('none');
     setExtractionMode('vision');
     startExtraction({ forceNewKey: true, modeOverride: 'vision' });
+  };
+
+  const handlePresetChange = async (value: string) => {
+    const preset = value === 'auto' ? null : value;
+    setPlanPreset(preset);
+    setDetectedPreset(null);
+    await supabase.from('projects').update({ plan_preset: preset }).eq('id', id);
+  };
+
+  const handleUseSuggestion = async () => {
+    if (detectedPreset) {
+      setPlanPreset(detectedPreset);
+      setDetectedPreset(null);
+      await supabase.from('projects').update({ plan_preset: detectedPreset }).eq('id', id);
+    }
   };
 
   const [pdfError, setPdfError] = useState(false);
@@ -281,6 +329,41 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
               </button>
             </div>
           )}
+          {/* Plan preset dropdown */}
+          {!isExtracting && !isComplete && (
+            <>
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-px bg-zinc-800" />
+                <select
+                  value={planPreset || 'auto'}
+                  onChange={(e) => handlePresetChange(e.target.value)}
+                  className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="auto">Auto / Unknown</option>
+                  {PLAN_PRESETS.map(p => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+                {planPreset && (
+                  <span className="text-[10px] text-cyan-400 font-mono">
+                    preset: {planPreset}
+                  </span>
+                )}
+              </div>
+              {/* Auto-detection suggestion */}
+              {!planPreset && detectedPreset && (
+                <div className="flex items-center gap-1.5 text-[11px] text-amber-400/80">
+                  <span>Suggested: &ldquo;{detectedPreset}&rdquo;</span>
+                  <button
+                    onClick={handleUseSuggestion}
+                    className="underline hover:text-amber-300"
+                  >
+                    Use this preset
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Action buttons based on outcome */}
@@ -342,79 +425,86 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
         </div>
       </div>
 
-      {/* Full-screen PDF with floating overlay */}
-      <div ref={containerRef} className="flex-1 relative overflow-hidden">
-        {/* PDF fills the entire area */}
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-950 overflow-auto">
-          <div
-            className={`relative ${isExtracting ? 'animate-pulse-glow' : ''}`}
-            style={{ borderRadius: '4px' }}
-          >
-            {pdfError ? (
-              <div
-                className="flex flex-col items-center justify-center bg-zinc-900 rounded gap-3"
-                style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
-              >
-                <p className="text-zinc-400 text-sm">PDF preview unavailable</p>
-                <p className="text-zinc-600 text-xs">Extraction is still running in the background</p>
-              </div>
-            ) : (
-              <Document
-                file={project.pdf_url}
-                onLoadSuccess={({ numPages }) => {
-                  setNumPages(numPages);
-                  setPdfReady(true);
-                }}
-                onLoadError={() => setPdfError(true)}
-                loading={
-                  <div
-                    className="flex items-center justify-center bg-zinc-900 rounded"
-                    style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
-                  >
-                    <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
-                  </div>
-                }
-              >
-                {pdfReady && (
-                  <Page
-                    pageNumber={currentPage}
-                    height={pdfHeight}
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                  />
-                )}
-              </Document>
-            )}
+      {/* Main content: PDF + Results side panel */}
+      <div ref={containerRef} className="flex-1 relative overflow-hidden flex">
+        {/* PDF area */}
+        <div className={`relative overflow-hidden ${(ocrOutcome === 'complete' || ocrOutcome === 'review') && envelope ? 'flex-1' : 'w-full'}`}>
+          <div className="absolute inset-0 flex items-center justify-center bg-zinc-950 overflow-auto">
+            <div
+              className={`relative ${isExtracting ? 'animate-pulse-glow' : ''}`}
+              style={{ borderRadius: '4px' }}
+            >
+              {pdfError ? (
+                <div
+                  className="flex flex-col items-center justify-center bg-zinc-900 rounded gap-3"
+                  style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
+                >
+                  <p className="text-zinc-400 text-sm">PDF preview unavailable</p>
+                  <p className="text-zinc-600 text-xs">Extraction is still running in the background</p>
+                </div>
+              ) : (
+                <Document
+                  file={project.pdf_url}
+                  onLoadSuccess={({ numPages }) => {
+                    setNumPages(numPages);
+                    setPdfReady(true);
+                  }}
+                  onLoadError={() => setPdfError(true)}
+                  loading={
+                    <div
+                      className="flex items-center justify-center bg-zinc-900 rounded"
+                      style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
+                    >
+                      <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
+                    </div>
+                  }
+                >
+                  {pdfReady && (
+                    <Page
+                      pageNumber={currentPage}
+                      height={pdfHeight}
+                      renderTextLayer={false}
+                      renderAnnotationLayer={false}
+                    />
+                  )}
+                </Document>
+              )}
 
-            {/* Scanning overlay on top of PDF */}
-            <ScanningOverlay isActive={isExtracting} />
+              {/* Scanning overlay on top of PDF */}
+              <ScanningOverlay isActive={isExtracting} />
+            </div>
           </div>
+
+          {/* Page indicator — bottom center */}
+          {numPages > 0 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-zinc-800/90 backdrop-blur px-3 py-1.5 rounded-full">
+              <p className="text-xs text-zinc-400">
+                Page {currentPage} of {numPages}
+              </p>
+            </div>
+          )}
+
+          {/* Floating analysis panel — bottom right (during extraction only) */}
+          {(isExtracting || hasError || (ocrOutcome === 'failed')) && (
+            <div className="absolute bottom-4 right-4 z-20 w-80 max-h-[60%] rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-zinc-800">
+              <AnalysisPanel
+                isActive={isExtracting}
+                isComplete={isComplete}
+                hasError={hasError}
+                errorMessage={errorMessage}
+                ocrOutcome={ocrOutcome}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Page indicator — bottom center */}
-        {numPages > 0 && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-zinc-800/90 backdrop-blur px-3 py-1.5 rounded-full">
-            <p className="text-xs text-zinc-400">
-              Page {currentPage} of {numPages}
-            </p>
-          </div>
-        )}
-
-        {/* Floating analysis panel — bottom right */}
-        <div className="absolute bottom-4 right-4 z-20 w-80 max-h-[60%] rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-zinc-800">
-          <AnalysisPanel
-            isActive={isExtracting}
-            isComplete={isComplete}
-            hasError={hasError}
-            errorMessage={errorMessage}
-            ocrOutcome={ocrOutcome}
-          />
-        </div>
-
-        {/* ScopeCard panel when OCR returns review — bottom left */}
-        {ocrOutcome === 'review' && envelope && (
-          <div className="absolute bottom-4 left-4 z-20 w-96 max-h-[60%] overflow-auto rounded-xl shadow-2xl shadow-black/50">
-            <ScopeCard envelope={envelope} />
+        {/* Results side panel — slides in when results available */}
+        {(ocrOutcome === 'complete' || ocrOutcome === 'review') && envelope && (
+          <div className="w-[420px] border-l border-zinc-800 bg-zinc-900/80 overflow-y-auto p-5">
+            <TakeoffResults
+              envelope={envelope}
+              onGenerateQuote={() => router.push(`/projects/${id}/quote`)}
+            />
           </div>
         )}
       </div>

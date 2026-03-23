@@ -13,6 +13,7 @@ import { FileText, Download, Mail, Loader2, AlertCircle, Settings, Plus, Trash2,
 import { DemoInstructions } from '@/components/demo/DemoInstructions';
 import { DemoTooltip } from '@/components/demo/DemoTooltip';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
+import { resolveActiveMode } from '@/lib/extraction/resolveActiveMode';
 
 // ─── Interfaces ─────────────────────────────────────────────
 
@@ -198,8 +199,14 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       const pricing = (pricingData?.value || DEFAULT_PRICING) as GlobalPricing;
       setGlobalPricing(pricing);
 
-      // Load takeoff envelope from documents (pdfengine OCR)
-      let loadedEnvelope: TakeoffEnvelopeV1 | null = null;
+      // Load extraction_runs with envelope data
+      const { data: runsData } = await supabase
+        .from('extraction_runs')
+        .select('id, mode, status, finished_at, takeoff_envelope')
+        .eq('project_id', id)
+        .order('finished_at', { ascending: false });
+
+      // Check documents for legacy envelope
       const { data: docsData } = await supabase
         .from('documents')
         .select('takeoff_envelope')
@@ -208,13 +215,40 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (docsData?.[0]?.takeoff_envelope) {
-        loadedEnvelope = docsData[0].takeoff_envelope as unknown as TakeoffEnvelopeV1;
+      const hasDocEnvelope = !!docsData?.[0]?.takeoff_envelope;
+      const runsTyped = (runsData || []) as any[];
+
+      const resolution = resolveActiveMode({
+        persistedMode: (projectData?.active_extraction_mode as 'ocr' | 'vision' | null) || null,
+        runs: runsTyped.map((r: any) => ({
+          id: r.id, mode: r.mode, status: r.status, finished_at: r.finished_at,
+        })),
+        hasEnvelope: hasDocEnvelope || runsTyped.some((r: any) => (r.mode === 'ocr' || r.mode === 'hybrid') && r.takeoff_envelope),
+        hasRooms: loadedRooms.length > 0,
+      });
+
+      // Run-tied envelope: prefer envelope from the specific activeRun
+      let loadedEnvelope: TakeoffEnvelopeV1 | null = null;
+      if (resolution.mode === 'ocr' && resolution.activeRun) {
+        const activeRunData = runsTyped.find((r: any) => r.id === resolution.activeRun!.id);
+        if (activeRunData?.takeoff_envelope) {
+          loadedEnvelope = activeRunData.takeoff_envelope as unknown as TakeoffEnvelopeV1;
+        }
+      }
+      // Fallback: documents.takeoff_envelope (legacy/backfill)
+      if (!loadedEnvelope && resolution.mode === 'ocr' && hasDocEnvelope) {
+        loadedEnvelope = docsData![0].takeoff_envelope as unknown as TakeoffEnvelopeV1;
+      }
+      if (loadedEnvelope) {
         setEnvelope(loadedEnvelope);
       }
 
-      // Calculate available areas based on extracted data
-      initializeInsulationAreas(loadedRooms, pricing, loadedEnvelope);
+      // Only pass envelope to quote when OCR is the active mode
+      initializeInsulationAreas(
+        loadedRooms,
+        pricing,
+        resolution.mode === 'ocr' ? loadedEnvelope : null,
+      );
 
       // Load existing quote
       const { data: quoteData } = await supabase
@@ -256,25 +290,39 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
 
     // Attic/Ceiling - prefer envelope, then attic rooms, then living area
     const envCeiling = env?.summary?.estimated_ceiling_sf || 0;
+    const ceilingStatus = env?.completeness?.ceiling_area || 'missing';
     const atticRooms = loadedRooms.filter((r) => r.type === 'attic');
     const totalAtticArea = atticRooms.reduce((sum, r) => sum + (r.area_sqft || 0), 0);
     const ceilingArea = envCeiling > 0 ? envCeiling : (totalAtticArea > 0 ? totalAtticArea : totalLivingArea);
-    const ceilingSource = envCeiling > 0 ? ' (pdfengine)' : '';
+    const ceilingSource = envCeiling > 0 ? ` (pdfengine · ${ceilingStatus})` : '';
 
     if (ceilingArea > 0) {
       areas.push({
         id: 'attic_ceiling',
         name: `Attic/Ceiling Insulation${ceilingSource}`,
         description: `${formatSqft(ceilingArea)} sq ft of ceiling area`,
-        enabled: true,
+        enabled: envCeiling > 0 ? ceilingStatus !== 'missing' : true,
         rValue: null,
         sqft: ceilingArea,
         pricePerSqft: pricing.attic_per_sqft,
       });
     }
 
-    // Exterior Walls
-    if (livingWallArea > 0) {
+    // Exterior Walls — prefer OCR envelope net_sf, then rooms, then estimate
+    const envNetWallSF = env?.summary?.net_sf || 0;
+    const envGrossWallSF = env?.summary?.gross_sf || 0;
+    const wallStatus = env?.completeness?.net_sf || 'missing';
+    if (envNetWallSF > 0) {
+      areas.push({
+        id: 'exterior_walls',
+        name: `Exterior Walls (pdfengine${wallStatus === 'estimated' ? ' · estimated' : ''})`,
+        description: `${formatSqft(envNetWallSF)} net sf (${formatSqft(envGrossWallSF)} gross − openings)`,
+        enabled: wallStatus === 'final',  // Only auto-enable if completeness is final
+        rValue: null,
+        sqft: envNetWallSF,
+        pricePerSqft: pricing.wall_per_sqft,
+      });
+    } else if (livingWallArea > 0) {
       areas.push({
         id: 'exterior_walls',
         name: 'Exterior Walls',
@@ -337,15 +385,16 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
 
     // Crawlspace/Floor - prefer envelope, then crawlspace rooms, then living area
     const envCrawlspace = env?.summary?.estimated_crawlspace_sf || 0;
+    const crawlspaceStatus = env?.completeness?.crawlspace_area || 'missing';
     const crawlspaceRooms = loadedRooms.filter((r) => r.type === 'crawlspace');
     const totalCrawlspaceArea = crawlspaceRooms.reduce((sum, r) => sum + (r.area_sqft || 0), 0);
 
     if (envCrawlspace > 0) {
       areas.push({
         id: 'crawlspace_floor',
-        name: 'Crawlspace/Floor Insulation (pdfengine)',
+        name: `Crawlspace/Floor Insulation (pdfengine · ${crawlspaceStatus})`,
         description: `${formatSqft(envCrawlspace)} sq ft from OCR pipeline`,
-        enabled: true,
+        enabled: crawlspaceStatus !== 'missing',
         rValue: null,
         sqft: envCrawlspace,
         pricePerSqft: pricing.floor_per_sqft,

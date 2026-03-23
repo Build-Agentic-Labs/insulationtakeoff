@@ -16,6 +16,8 @@ export interface Database {
           pdf_url: string | null
           status: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'
           client_id: string | null
+          active_extraction_mode: 'ocr' | 'vision' | null
+          plan_preset: string | null
           created_at: string
           updated_at: string
         }
@@ -25,6 +27,8 @@ export interface Database {
           pdf_url?: string | null
           status?: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'
           client_id?: string | null
+          active_extraction_mode?: 'ocr' | 'vision' | null
+          plan_preset?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -34,6 +38,8 @@ export interface Database {
           pdf_url?: string | null
           status?: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'
           client_id?: string | null
+          active_extraction_mode?: 'ocr' | 'vision' | null
+          plan_preset?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -308,7 +314,7 @@ export interface Database {
           id: string
           project_id: string
           document_id: string
-          mode: 'ocr' | 'vision'
+          mode: 'ocr' | 'vision' | 'hybrid'
           idempotency_key: string
           status: 'started' | 'complete' | 'review' | 'failed'
           attempt: number
@@ -325,7 +331,7 @@ export interface Database {
           id?: string
           project_id: string
           document_id: string
-          mode: 'ocr' | 'vision'
+          mode: 'ocr' | 'vision' | 'hybrid'
           idempotency_key: string
           status?: 'started' | 'complete' | 'review' | 'failed'
           attempt?: number
@@ -342,7 +348,7 @@ export interface Database {
           id?: string
           project_id?: string
           document_id?: string
-          mode?: 'ocr' | 'vision'
+          mode?: 'ocr' | 'vision' | 'hybrid'
           idempotency_key?: string
           status?: 'started' | 'complete' | 'review' | 'failed'
           attempt?: number

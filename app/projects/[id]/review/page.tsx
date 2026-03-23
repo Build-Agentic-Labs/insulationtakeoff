@@ -29,11 +29,17 @@ import {
   ChevronDown,
   ChevronRight,
   LucideIcon,
+  Activity,
+  Eye,
+  Scan,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import { DemoInstructions } from '@/components/demo/DemoInstructions';
 import { DemoTooltip } from '@/components/demo/DemoTooltip';
 import { ScopeCard } from '@/components/extraction/ScopeCard';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
+import { resolveActiveMode as resolveMode, type ModeResolution } from '@/lib/extraction/resolveActiveMode';
 
 // ─── Interfaces ─────────────────────────────────────────────
 
@@ -68,7 +74,21 @@ interface Project {
   name: string;
   status: string;
   pdf_url: string | null;
+  active_extraction_mode: 'ocr' | 'vision' | null;
+  plan_preset: string | null;
 }
+
+interface ExtractionRun {
+  id: string;
+  mode: 'ocr' | 'vision' | 'hybrid';
+  status: string;
+  attempt: number;
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+}
+
+type ActiveMode = 'ocr' | 'vision' | null;
 
 const ROOM_TYPES = [
   { value: 'living', label: 'Living Space', icon: Home },
@@ -177,6 +197,271 @@ function SegmentCard({
   );
 }
 
+// ─── Active Run Banner ──────────────────────────────────────
+
+interface ActiveRunBannerProps {
+  activeMode: ActiveMode;
+  onSwitch: (mode: ActiveMode) => void;
+  hasOcr: boolean;
+  hasVision: boolean;
+  envelope: TakeoffEnvelopeV1 | null;
+  ocrRun: ExtractionRun | null;
+  visionRun: ExtractionRun | null;
+  resolution: ModeResolution | null;
+  onRerunPage?: (pageIndex: number) => void;
+  isRerunning?: boolean;
+  planPreset?: string | null;
+}
+
+function ActiveRunBanner({
+  activeMode,
+  onSwitch,
+  hasOcr,
+  hasVision,
+  envelope,
+  ocrRun,
+  visionRun,
+  resolution,
+  onRerunPage,
+  isRerunning,
+  planPreset,
+}: ActiveRunBannerProps) {
+  const activeRun = activeMode === 'ocr' ? ocrRun : visionRun;
+
+  // Build "why review" reasons from envelope
+  const reviewReasons: string[] = [];
+  if (activeMode === 'ocr' && envelope) {
+    if (envelope.status === 'review') {
+      // Page selection confidence
+      if (envelope.page_selection?.confidence < 0.7) {
+        reviewReasons.push(
+          `Page selection confidence ${Math.round(envelope.page_selection.confidence * 100)}% (below 70% threshold)`
+        );
+      }
+      // Completeness flags
+      const c = envelope.completeness;
+      if (c.ceiling_area === 'estimated') reviewReasons.push('Ceiling area is estimated (not measured)');
+      if (c.garage_ceiling_area === 'estimated') reviewReasons.push('Garage ceiling area is estimated');
+      if (c.crawlspace_area === 'estimated') reviewReasons.push('Crawlspace area is estimated');
+      if (c.crawlspace_area === 'missing') reviewReasons.push('Crawlspace area is missing');
+      if (c.net_sf === 'missing') reviewReasons.push('Net wall SF is missing (openings phase incomplete)');
+      // Missing components
+      if (c.missing_components?.length > 0) {
+        reviewReasons.push(`Missing: ${c.missing_components.join(', ')}`);
+      }
+      // Degradation
+      if (c.degradation_reason) {
+        reviewReasons.push(`Degraded: ${c.degradation_reason}`);
+      }
+      // Foundation issues
+      const foundationIssues = envelope.review.items.filter(
+        i => i.severity === 'warning' || i.severity === 'error'
+      );
+      for (const issue of foundationIssues.slice(0, 3)) {
+        reviewReasons.push(issue.message);
+      }
+    }
+  }
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 space-y-2">
+      {/* Mode switcher */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Activity className="h-4 w-4 text-cyan-400" />
+          <span className="text-sm font-semibold text-zinc-200">Active Run</span>
+        </div>
+        <div className="flex items-center gap-1 bg-zinc-800 rounded-lg p-0.5">
+          <button
+            onClick={() => hasOcr && onSwitch('ocr')}
+            disabled={!hasOcr}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              activeMode === 'ocr'
+                ? 'bg-cyan-600 text-white'
+                : hasOcr
+                  ? 'text-zinc-400 hover:text-zinc-200'
+                  : 'text-zinc-600 cursor-not-allowed'
+            }`}
+          >
+            <Scan className="h-3 w-3" />
+            OCR
+          </button>
+          <button
+            onClick={() => hasVision && onSwitch('vision')}
+            disabled={!hasVision}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              activeMode === 'vision'
+                ? 'bg-purple-600 text-white'
+                : hasVision
+                  ? 'text-zinc-400 hover:text-zinc-200'
+                  : 'text-zinc-600 cursor-not-allowed'
+            }`}
+          >
+            <Eye className="h-3 w-3" />
+            Vision
+          </button>
+        </div>
+      </div>
+
+      {/* Debug info */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500 font-mono">
+        {activeMode === 'ocr' && envelope && (
+          <>
+            <span>run_id: {envelope.run_id?.slice(0, 8) || '—'}</span>
+            <span>mode: {envelope.mode_used}</span>
+            <span>status: <span className={
+              envelope.status === 'complete' ? 'text-green-400' :
+              envelope.status === 'review' ? 'text-amber-400' : 'text-red-400'
+            }>{envelope.status}</span></span>
+            <span>confidence: {Math.round(envelope.telemetry.overall_confidence * 100)}%</span>
+            <span>page: {envelope.page_selection?.selected_page_index ?? '—'} ({envelope.page_selection?.source})</span>
+            <span>preset: <span className="text-cyan-400">{planPreset || 'auto'}</span></span>
+          </>
+        )}
+        {activeMode === 'vision' && visionRun && (
+          <>
+            <span>run_id: {visionRun.id?.slice(0, 8) || '—'}</span>
+            <span>mode: vision</span>
+            <span>status: <span className={
+              visionRun.status === 'complete' ? 'text-green-400' :
+              visionRun.status === 'review' ? 'text-amber-400' : 'text-red-400'
+            }>{visionRun.status}</span></span>
+          </>
+        )}
+        {activeRun?.finished_at && (
+          <span>ran: {new Date(activeRun.finished_at).toLocaleString()}</span>
+        )}
+      </div>
+
+      {/* Completeness flags */}
+      {activeMode === 'ocr' && envelope?.completeness && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {Object.entries({
+            gross_sf: envelope.completeness.gross_sf,
+            exterior_lf: envelope.completeness.exterior_lf,
+            openings: envelope.completeness.openings,
+            net_sf: envelope.completeness.net_sf,
+            ceiling: envelope.completeness.ceiling_area,
+            garage: envelope.completeness.garage_ceiling_area,
+            crawlspace: envelope.completeness.crawlspace_area,
+            rim_joist: envelope.completeness.rim_joist,
+          }).map(([key, status]) => (
+            <span
+              key={key}
+              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                status === 'final'
+                  ? 'bg-green-900/40 text-green-400 border border-green-800/40'
+                  : status === 'estimated'
+                    ? 'bg-amber-900/30 text-amber-400 border border-amber-800/40'
+                    : 'bg-red-900/30 text-red-400 border border-red-800/40'
+              }`}
+            >
+              {key}: {status}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Stale envelope — structural gate */}
+      {resolution?.staleEnvelope && activeMode === 'ocr' && (
+        <div className="bg-amber-950/50 border-2 border-amber-600/60 rounded-lg px-4 py-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-amber-300">Stale OCR Result</p>
+              <p className="text-xs text-amber-400/80 mt-0.5">
+                The most recent OCR run <span className="font-medium text-red-400">failed</span>
+                {resolution.failedRun?.finished_at
+                  ? ` at ${new Date(resolution.failedRun.finished_at).toLocaleString()}`
+                  : ''}. The data below is from an older successful run.
+              </p>
+            </div>
+          </div>
+          <p className="text-[11px] text-amber-500/70 italic">
+            Values may not reflect your latest document. Re-run extraction or switch to Vision mode.
+          </p>
+        </div>
+      )}
+
+      {/* Why review — reason surface */}
+      {reviewReasons.length > 0 && (
+        <div className="space-y-1 pt-1 border-t border-zinc-800">
+          <p className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider">Why review needed</p>
+          {reviewReasons.slice(0, 4).map((reason, i) => (
+            <div key={i} className="flex items-start gap-1.5 text-[11px] text-zinc-400">
+              <span className="text-amber-500 shrink-0">•</span>
+              <span>{reason}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Data source warning */}
+      {hasOcr && hasVision && !resolution?.staleEnvelope && (
+        <p className="text-[11px] text-amber-400/80">
+          Both OCR and Vision runs exist. Showing data from {activeMode === 'ocr' ? 'OCR envelope' : 'Vision rooms/openings'} only.
+          Switch above to compare.
+        </p>
+      )}
+
+      {/* Page override — low confidence page selection */}
+      {activeMode === 'ocr' && envelope && onRerunPage && (
+        envelope.page_selection?.confidence < 0.70 || envelope.page_selection?.source === 'fallback'
+      ) && envelope.page_selection?.candidates && envelope.page_selection.candidates.length > 0 && (
+        <div className="space-y-2 pt-2 border-t border-zinc-800">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+            <p className="text-xs font-semibold text-amber-300">
+              Low confidence page selection ({Math.round(envelope.page_selection.confidence * 100)}%)
+            </p>
+          </div>
+          <p className="text-[11px] text-zinc-400">
+            The auto-selected page may not be the floor plan. Pick the correct page and re-run:
+          </p>
+          <div className="grid gap-1.5">
+            {envelope.page_selection.candidates.slice(0, 5).map((candidate) => (
+              <button
+                key={candidate.page_index}
+                disabled={isRerunning}
+                onClick={() => onRerunPage(candidate.page_index)}
+                className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors ${
+                  candidate.page_index === envelope.page_selection?.selected_page_index
+                    ? 'bg-cyan-900/40 border border-cyan-700/50 text-cyan-300'
+                    : 'bg-zinc-800/60 border border-zinc-700/40 text-zinc-300 hover:bg-zinc-700/60 hover:border-zinc-600'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-medium">Page {candidate.page_index + 1}</span>
+                  {candidate.page_index === envelope.page_selection?.selected_page_index && (
+                    <span className="text-[10px] text-cyan-400/70">(current)</span>
+                  )}
+                  {candidate.reasons?.length > 0 && (
+                    <span className="text-zinc-500 truncate max-w-[200px]">
+                      {candidate.reasons[0]}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-500">score: {candidate.score.toFixed(3)}</span>
+                  {candidate.page_index !== envelope.page_selection?.selected_page_index && (
+                    <RotateCcw className="h-3 w-3 text-cyan-400" />
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+          {isRerunning && (
+            <div className="flex items-center gap-2 text-xs text-cyan-400">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Re-running OCR on selected page...
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Review Page ───────────────────────────────────────
 
 export default function ReviewPage({ params }: { params: Promise<{ id: string }> }) {
@@ -192,6 +477,13 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
   // Takeoff envelope from pdfengine (if OCR extraction was used)
   const [envelope, setEnvelope] = useState<TakeoffEnvelopeV1 | null>(null);
+  const [envelopeSource, setEnvelopeSource] = useState<'run' | 'document' | null>(null);
+  const [isRerunning, setIsRerunning] = useState(false);
+
+  // Active run tracking — prevents mixing OCR and Vision data
+  const [activeMode, setActiveMode] = useState<ActiveMode>(null);
+  const [extractionRuns, setExtractionRuns] = useState<ExtractionRun[]>([]);
+  const [modeResolution, setModeResolution] = useState<ModeResolution | null>(null);
 
   // Segment verification (UI-only, not persisted)
   const [verifiedSegments, setVerifiedSegments] = useState<Set<string>>(new Set());
@@ -263,7 +555,17 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
       console.log('Openings loaded:', openingsData);
       setOpenings(openingsData || []);
 
-      // Load takeoff envelope from documents (pdfengine OCR)
+      // Load extraction runs FIRST — we need them to determine which envelope to show
+      const { data: runsData } = await supabase
+        .from('extraction_runs')
+        .select('id, mode, status, attempt, started_at, finished_at, error, takeoff_envelope')
+        .eq('project_id', id)
+        .order('finished_at', { ascending: false });
+
+      const runs = (runsData || []) as (ExtractionRun & { takeoff_envelope?: any })[];
+      setExtractionRuns(runs);
+
+      // Check if ANY document has an envelope (for mode resolution hasEnvelope flag)
       const { data: docsData } = await supabase
         .from('documents')
         .select('takeoff_envelope')
@@ -272,13 +574,92 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (docsData?.[0]?.takeoff_envelope) {
-        setEnvelope(docsData[0].takeoff_envelope as unknown as TakeoffEnvelopeV1);
+      const hasDocEnvelope = !!docsData?.[0]?.takeoff_envelope;
+
+      // Resolve active mode using shared helper
+      const resolution = resolveMode({
+        persistedMode: (projectData?.active_extraction_mode as ActiveMode) || null,
+        runs: runs.map(r => ({
+          id: r.id,
+          mode: r.mode,
+          status: r.status,
+          finished_at: r.finished_at,
+        })),
+        hasEnvelope: hasDocEnvelope || runs.some(r => (r.mode === 'ocr' || r.mode === 'hybrid') && r.takeoff_envelope),
+        hasRooms: (roomsData?.length ?? 0) > 0,
+      });
+
+      setModeResolution(resolution);
+      setActiveMode(resolution.mode);
+
+      // Run-tied envelope: prefer envelope from the specific activeRun
+      let loadedEnvelope: TakeoffEnvelopeV1 | null = null;
+      let source: 'run' | 'document' | null = null;
+
+      if (resolution.mode === 'ocr' && resolution.activeRun) {
+        // Find the run's envelope
+        const activeRunData = runs.find(r => r.id === resolution.activeRun!.id);
+        if (activeRunData?.takeoff_envelope) {
+          loadedEnvelope = activeRunData.takeoff_envelope as unknown as TakeoffEnvelopeV1;
+          source = 'run';
+        }
       }
+
+      // Fallback: use documents.takeoff_envelope (legacy/backfill)
+      if (!loadedEnvelope && resolution.mode === 'ocr' && hasDocEnvelope) {
+        loadedEnvelope = docsData![0].takeoff_envelope as unknown as TakeoffEnvelopeV1;
+        source = 'document';
+      }
+
+      setEnvelope(loadedEnvelope);
+      setEnvelopeSource(source);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Persist active mode to project when user toggles
+  const handleModeSwitch = async (mode: ActiveMode) => {
+    setActiveMode(mode);
+    try {
+      await supabase
+        .from('projects')
+        .update({ active_extraction_mode: mode })
+        .eq('id', id);
+    } catch (error) {
+      console.error('Error persisting active mode:', error);
+    }
+  };
+
+  // Re-run OCR on a specific page (user override)
+  const handleRerunPage = async (pageIndex: number) => {
+    setIsRerunning(true);
+    try {
+      const response = await fetch('/api/extract-ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: id,
+          idempotencyKey: crypto.randomUUID(), // force new run
+          pageOverride: pageIndex,
+          planName: project?.plan_preset || undefined,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        console.error('Page override rerun failed:', data.error);
+        return;
+      }
+
+      // Reload data to pick up new envelope
+      await loadData();
+    } catch (error) {
+      console.error('Error re-running OCR:', error);
+    } finally {
+      setIsRerunning(false);
     }
   };
 
@@ -563,23 +944,63 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
     return ROOM_TYPES.find(t => t.value === type)?.label || type;
   };
 
+  // ─── Active run helpers ──────────────────────────────────
+
+  const ocrRun = extractionRuns.find(r => (r.mode === 'ocr' || r.mode === 'hybrid') && (r.status === 'complete' || r.status === 'review')) || null;
+  const visionRun = extractionRuns.find(r => r.mode === 'vision' && r.status === 'complete') || null;
+  const hasOcrData = !!envelope;
+  const hasVisionData = rooms.length > 0;
+
   // ─── Derived calculations ─────────────────────────────────
 
+  // Vision-sourced values (used when activeMode === 'vision' or as fallback)
   const mainRoom = rooms.find(r => r.type === 'living' && r.wall_sf);
-  const grossWallSF = mainRoom?.wall_sf || 0;
-  const floorSF = mainRoom?.floor_sf || 0;
-  const ceilingSF = mainRoom?.ceiling_sf || 0;
-  const wallComposition = mainRoom?.wall_composition || null;
-  const studSize = mainRoom?.stud_size || null;
-  const perimeterFt = mainRoom?.perimeter_ft || 0;
-  const wallHeightFt = mainRoom?.height_ft || 0;
+  const visionGrossWallSF = mainRoom?.wall_sf || 0;
+  const visionFloorSF = mainRoom?.floor_sf || 0;
+  const visionCeilingSF = mainRoom?.ceiling_sf || 0;
+  const visionWallComposition = mainRoom?.wall_composition || null;
+  const visionStudSize = mainRoom?.stud_size || null;
+  const visionPerimeterFt = mainRoom?.perimeter_ft || 0;
+  const visionWallHeightFt = mainRoom?.height_ft || 0;
 
   const doors = openings.filter(o => o.type === 'door');
   const windows = openings.filter(o => o.type === 'window');
 
-  const totalDoorSF = doors.reduce((sum, d) => sum + (d.area_sqft || 0) * (d.count || 1), 0);
-  const totalWindowSF = windows.reduce((sum, w) => sum + (w.area_sqft || 0) * (w.count || 1), 0);
-  const netWallSF = grossWallSF - totalDoorSF - totalWindowSF;
+  const visionTotalDoorSF = doors.reduce((sum, d) => sum + (d.area_sqft || 0) * (d.count || 1), 0);
+  const visionTotalWindowSF = windows.reduce((sum, w) => sum + (w.area_sqft || 0) * (w.count || 1), 0);
+  const visionNetWallSF = visionGrossWallSF - visionTotalDoorSF - visionTotalWindowSF;
+
+  // OCR-sourced values (used when activeMode === 'ocr')
+  const ocrGrossWallSF = envelope?.summary?.gross_sf || 0;
+  const ocrNetWallSF = envelope?.summary?.net_sf || 0;
+  const ocrOpeningAreaSF = envelope?.summary?.opening_area_sf || 0;
+  const ocrExteriorLF = envelope?.summary?.exterior_lf || 0;
+  const ocrCeilingSF = envelope?.summary?.estimated_ceiling_sf || 0;
+  const ocrCrawlspaceSF = envelope?.summary?.estimated_crawlspace_sf || 0;
+  const ocrOpeningCount = envelope?.summary?.opening_count || 0;
+  // Derive door/window from envelope openings items
+  const ocrDoorItems = envelope?.openings?.items?.filter(i => i.opening_type === 'door' || i.opening_type === 'door_arc') || [];
+  const ocrWindowItems = envelope?.openings?.items?.filter(i => i.opening_type === 'window' || i.opening_type === 'window_break') || [];
+  const ocrTotalDoorSF = ocrDoorItems.reduce((sum, d) => sum + (d.area_sf || 0), 0);
+  const ocrTotalWindowSF = ocrWindowItems.reduce((sum, w) => sum + (w.area_sf || 0), 0);
+
+  // Active-mode derived values — render from one source only
+  // IMPORTANT: when activeMode is null (not yet resolved), default to Vision
+  // to avoid showing zeros. Once loadData resolves, this re-renders.
+  const isOcrActive = activeMode === 'ocr';
+  const grossWallSF = isOcrActive ? ocrGrossWallSF : visionGrossWallSF;
+  const netWallSF = isOcrActive ? ocrNetWallSF : visionNetWallSF;
+  const totalDoorSF = isOcrActive ? ocrTotalDoorSF : visionTotalDoorSF;
+  const totalWindowSF = isOcrActive ? ocrTotalWindowSF : visionTotalWindowSF;
+  const floorSF = isOcrActive ? ocrCrawlspaceSF : visionFloorSF;
+  const ceilingSF = isOcrActive ? ocrCeilingSF : visionCeilingSF;
+  const wallComposition = isOcrActive ? null : visionWallComposition;
+  const studSize = isOcrActive ? null : visionStudSize;
+  const perimeterFt = isOcrActive ? ocrExteriorLF : visionPerimeterFt;
+  const wallHeightFt = isOcrActive ? 0 : visionWallHeightFt;
+
+  // Data source diagnostic — proves no mixing
+  const dataSource = isOcrActive ? 'envelope' : 'vision';
 
   // Build the list of visible segments for progress tracking
   const segmentIds: string[] = ['walls', 'doors', 'windows', 'ceiling'];
@@ -668,6 +1089,23 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
             {/* Right panel: Segment Cards */}
             <div className="overflow-auto space-y-3">
+              {/* Active Run Banner */}
+              {(hasOcrData || hasVisionData) && activeMode && (
+                <ActiveRunBanner
+                  activeMode={activeMode}
+                  onSwitch={handleModeSwitch}
+                  hasOcr={hasOcrData}
+                  hasVision={hasVisionData}
+                  envelope={envelope}
+                  ocrRun={ocrRun}
+                  visionRun={visionRun}
+                  resolution={modeResolution}
+                  onRerunPage={handleRerunPage}
+                  isRerunning={isRerunning}
+                  planPreset={project?.plan_preset}
+                />
+              )}
+
               {/* Demo Instructions */}
               <DemoInstructions
                 title="Step 3: Review Extracted Data"
@@ -721,6 +1159,32 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 />
               )}
 
+              {/* ── Data Source Diagnostic ── */}
+              <div className="bg-zinc-950 border border-yellow-700/50 rounded-lg p-3 font-mono text-xs space-y-1">
+                <div className="text-yellow-500 font-bold mb-1">DATA SOURCE DIAGNOSTIC</div>
+                <div className="text-zinc-400">
+                  activeMode = <span className="text-yellow-300">{JSON.stringify(activeMode)}</span>
+                  {' | '}isOcrActive = <span className="text-yellow-300">{String(isOcrActive)}</span>
+                  {' | '}dataSource = <span className={dataSource === 'envelope' ? 'text-cyan-400' : 'text-purple-400'}>{dataSource}</span>
+                  {' | '}envelopeSource = <span className="text-yellow-300">{JSON.stringify(envelopeSource)}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-zinc-400 mt-1">
+                  <div>source_walls = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (gross=${ocrGrossWallSF}, net=${ocrNetWallSF})` : `vision (gross=${visionGrossWallSF})`}</span></div>
+                  <div>source_doors = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrDoorItems.length} items, ${ocrTotalDoorSF} sf)` : `vision (${doors.length} items, ${visionTotalDoorSF} sf)`}</span></div>
+                  <div>source_windows = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrWindowItems.length} items, ${ocrTotalWindowSF} sf)` : `vision (${windows.length} items, ${visionTotalWindowSF} sf)`}</span></div>
+                  <div>source_net = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrNetWallSF} sf)` : `vision (${visionNetWallSF} sf)`}</span></div>
+                  <div>rendered_gross = <span className="text-white">{grossWallSF}</span></div>
+                  <div>rendered_net = <span className="text-white">{netWallSF}</span></div>
+                  <div>rendered_doors = <span className="text-white">{totalDoorSF}</span></div>
+                  <div>rendered_windows = <span className="text-white">{totalWindowSF}</span></div>
+                </div>
+                {isOcrActive && envelope?.summary && (
+                  <div className="mt-1 pt-1 border-t border-zinc-800 text-zinc-500">
+                    raw envelope.summary: gross_sf={envelope.summary.gross_sf}, net_sf={envelope.summary.net_sf}, opening_area_sf={envelope.summary.opening_area_sf}, exterior_lf={envelope.summary.exterior_lf}, opening_count={envelope.summary.opening_count}
+                  </div>
+                )}
+              </div>
+
               {/* ── Segment 1: Exterior Walls ── */}
               <SegmentCard
                 id="walls"
@@ -731,7 +1195,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 verified={verifiedSegments.has('walls')}
                 onToggleVerify={() => toggleVerify('walls')}
                 editing={editingSegment === 'walls'}
-                onEdit={mainRoom ? startEditWalls : undefined}
+                onEdit={activeMode !== 'ocr' && mainRoom ? startEditWalls : undefined}
                 onCancelEdit={() => setEditingSegment(null)}
                 tooltip={
                   <DemoTooltip>
@@ -806,18 +1270,43 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                     <div className="bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-3 space-y-1.5 text-sm">
                       <div className="flex justify-between">
                         <span className="text-zinc-500">
-                          {perimeterFt > 0 && wallHeightFt > 0
-                            ? `${perimeterFt} ft perimeter × ${wallHeightFt} ft height`
-                            : 'Gross Wall SF'}
+                          {activeMode === 'ocr'
+                            ? `${Math.round(perimeterFt)} LF exterior perimeter`
+                            : perimeterFt > 0 && wallHeightFt > 0
+                              ? `${perimeterFt} ft perimeter × ${wallHeightFt} ft height`
+                              : 'Gross Wall SF'}
                         </span>
-                        <span className="font-medium">{grossWallSF > 0 ? grossWallSF.toLocaleString() : '—'}</span>
+                        <span className="font-medium">{grossWallSF > 0 ? Math.round(grossWallSF).toLocaleString() : '—'}</span>
                       </div>
+                      {/* Per-bucket breakdown for OCR mode */}
+                      {activeMode === 'ocr' && envelope?.buckets && envelope.buckets.length > 0 && (
+                        <div className="pl-3 space-y-1 border-l-2 border-zinc-300 dark:border-zinc-600">
+                          {envelope.buckets.map((b) => (
+                            <div key={b.height_ft} className="flex justify-between text-zinc-400">
+                              <span>{b.height_ft}' walls ({b.segment_count} seg)</span>
+                              <span>{Math.round(b.gross_sf).toLocaleString()} sf gross / {Math.round(b.net_sf).toLocaleString()} net</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* NET by bucket */}
+                      {activeMode === 'ocr' && envelope?.net?.by_bucket_net && Object.keys(envelope.net.by_bucket_net).length > 0 && (
+                        <div className="pl-3 space-y-1 border-l-2 border-cyan-700/50">
+                          <span className="text-[11px] uppercase tracking-wider text-zinc-500">Net by height</span>
+                          {Object.entries(envelope.net.by_bucket_net).map(([height, sf]) => (
+                            <div key={height} className="flex justify-between text-zinc-400">
+                              <span>{height} net</span>
+                              <span className="text-cyan-400">{Math.round(sf as number).toLocaleString()} sf</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="flex justify-between">
-                        <span className="text-zinc-500">− Door openings</span>
+                        <span className="text-zinc-500">− Door openings ({activeMode === 'ocr' ? ocrDoorItems.length : doors.length})</span>
                         <span className="text-red-500">−{Math.round(totalDoorSF).toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-zinc-500">− Window openings</span>
+                        <span className="text-zinc-500">− Window openings ({activeMode === 'ocr' ? ocrWindowItems.length : windows.length})</span>
                         <span className="text-red-500">−{Math.round(totalWindowSF).toLocaleString()}</span>
                       </div>
                       <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1.5 flex justify-between font-bold">
@@ -827,21 +1316,26 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                         </span>
                       </div>
                     </div>
-                    {/* Badges */}
-                    {(wallComposition || studSize) && (
-                      <div className="flex gap-2 flex-wrap">
-                        {studSize && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
-                            {studSize} studs
-                          </span>
-                        )}
-                        {wallComposition && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
-                            {wallComposition}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                    {/* Source badge */}
+                    <div className="flex gap-2 flex-wrap">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                        activeMode === 'ocr'
+                          ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
+                          : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                      }`}>
+                        Source: {activeMode === 'ocr' ? 'OCR Pipeline' : 'Vision / Manual'}
+                      </span>
+                      {studSize && (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+                          {studSize} studs
+                        </span>
+                      )}
+                      {wallComposition && (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
+                          {wallComposition}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
               </SegmentCard>
@@ -856,7 +1350,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 verified={verifiedSegments.has('doors')}
                 onToggleVerify={() => toggleVerify('doors')}
                 editing={editingSegment === 'doors'}
-                onEdit={() => startEditOpenings('door')}
+                onEdit={activeMode !== 'ocr' ? () => startEditOpenings('door') : undefined}
                 onCancelEdit={() => setEditingSegment(null)}
                 tooltip={
                   <DemoTooltip>
@@ -948,7 +1442,38 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                   </div>
                 ) : (
                   <div>
-                    {doors.length > 0 ? (
+                    {activeMode === 'ocr' && ocrDoorItems.length > 0 ? (
+                      <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-zinc-50 dark:bg-zinc-800/50">
+                              <th className="text-left px-3 py-2 font-medium text-zinc-500">ID</th>
+                              <th className="text-left px-3 py-2 font-medium text-zinc-500">Type</th>
+                              <th className="text-right px-3 py-2 font-medium text-zinc-500">Size</th>
+                              <th className="text-right px-3 py-2 font-medium text-zinc-500">Area</th>
+                              <th className="text-left px-3 py-2 font-medium text-zinc-500">Source</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ocrDoorItems.map(item => (
+                              <tr key={item.opening_id} className="border-t">
+                                <td className="px-3 py-2 font-mono text-xs">{item.opening_id.slice(0, 8)}</td>
+                                <td className="px-3 py-2">{item.opening_type}</td>
+                                <td className="px-3 py-2 text-right text-zinc-500">
+                                  {item.width_ft && item.height_ft
+                                    ? `${item.width_ft.toFixed(1)}' × ${item.height_ft.toFixed(1)}'`
+                                    : '—'}
+                                </td>
+                                <td className="px-3 py-2 text-right font-medium">
+                                  {item.area_sf ? `${Math.round(item.area_sf)} sf` : '—'}
+                                </td>
+                                <td className="px-3 py-2 text-xs text-zinc-500">{item.source}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : doors.length > 0 ? (
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
                           <thead>
@@ -1000,7 +1525,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 verified={verifiedSegments.has('windows')}
                 onToggleVerify={() => toggleVerify('windows')}
                 editing={editingSegment === 'windows'}
-                onEdit={() => startEditOpenings('window')}
+                onEdit={activeMode !== 'ocr' ? () => startEditOpenings('window') : undefined}
                 onCancelEdit={() => setEditingSegment(null)}
                 tooltip={
                   <DemoTooltip>
@@ -1092,7 +1617,38 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                   </div>
                 ) : (
                   <div>
-                    {windows.length > 0 ? (
+                    {activeMode === 'ocr' && ocrWindowItems.length > 0 ? (
+                      <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-zinc-50 dark:bg-zinc-800/50">
+                              <th className="text-left px-3 py-2 font-medium text-zinc-500">ID</th>
+                              <th className="text-left px-3 py-2 font-medium text-zinc-500">Type</th>
+                              <th className="text-right px-3 py-2 font-medium text-zinc-500">Size</th>
+                              <th className="text-right px-3 py-2 font-medium text-zinc-500">Area</th>
+                              <th className="text-left px-3 py-2 font-medium text-zinc-500">Source</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ocrWindowItems.map(item => (
+                              <tr key={item.opening_id} className="border-t">
+                                <td className="px-3 py-2 font-mono text-xs">{item.opening_id.slice(0, 8)}</td>
+                                <td className="px-3 py-2">{item.opening_type}</td>
+                                <td className="px-3 py-2 text-right text-zinc-500">
+                                  {item.width_ft && item.height_ft
+                                    ? `${item.width_ft.toFixed(1)}' × ${item.height_ft.toFixed(1)}'`
+                                    : '—'}
+                                </td>
+                                <td className="px-3 py-2 text-right font-medium">
+                                  {item.area_sf ? `${Math.round(item.area_sf)} sf` : '—'}
+                                </td>
+                                <td className="px-3 py-2 text-xs text-zinc-500">{item.source}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : windows.length > 0 ? (
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
                           <thead>
@@ -1144,7 +1700,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                 verified={verifiedSegments.has('ceiling')}
                 onToggleVerify={() => toggleVerify('ceiling')}
                 editing={editingSegment === 'ceiling'}
-                onEdit={mainRoom ? startEditCeiling : undefined}
+                onEdit={activeMode !== 'ocr' && mainRoom ? startEditCeiling : undefined}
                 onCancelEdit={() => setEditingSegment(null)}
                 tooltip={
                   <DemoTooltip>
@@ -1182,9 +1738,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                       </div>
                     </div>
                     <p className="text-xs text-zinc-400">
-                      {mainRoom
-                        ? `Source: ${mainRoom.name} (living area footprint)`
-                        : 'No living room data available — add a room first'}
+                      {activeMode === 'ocr'
+                        ? 'Source: OCR Pipeline (estimated from footprint)'
+                        : mainRoom
+                          ? `Source: ${mainRoom.name} (living area footprint)`
+                          : 'No living room data available — add a room first'}
                     </p>
                   </div>
                 )}
@@ -1201,7 +1759,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                   verified={verifiedSegments.has('floor')}
                   onToggleVerify={() => toggleVerify('floor')}
                   editing={editingSegment === 'floor'}
-                  onEdit={mainRoom ? startEditFloor : undefined}
+                  onEdit={activeMode !== 'ocr' && mainRoom ? startEditFloor : undefined}
                   onCancelEdit={() => setEditingSegment(null)}
                   tooltip={
                     <DemoTooltip>

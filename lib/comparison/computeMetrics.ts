@@ -134,7 +134,7 @@ function computeAgreement(deltas: (number | null)[], references: (number | null)
  */
 export async function computeComparisonMetrics(
   projectId: string,
-  currentMode: 'ocr' | 'vision',
+  currentMode: 'ocr' | 'vision' | 'hybrid',
   currentRunId: string,
 ): Promise<ComparisonMetrics | null> {
   const [envelope, visionSummary] = await Promise.all([
@@ -154,12 +154,12 @@ export async function computeComparisonMetrics(
   const openingSfDelta = ocrSummary.opening_area_sf - visionSummary.total_opening_sf;
 
   // Find the other run (if any)
-  const otherMode = currentMode === 'ocr' ? 'vision' : 'ocr';
+  const otherMode = currentMode === 'vision' ? 'ocr' : 'vision';
   const { data: otherRuns } = await supabaseAdmin
     .from('extraction_runs')
     .select('id')
     .eq('project_id', projectId)
-    .eq('mode', otherMode)
+    .in('mode', otherMode === 'ocr' ? ['ocr', 'hybrid'] : ['vision'])
     .in('status', ['complete', 'review'])
     .order('created_at', { ascending: false })
     .limit(1);
@@ -176,7 +176,7 @@ export async function computeComparisonMetrics(
 
   return {
     compared_at: new Date().toISOString(),
-    ocr_run_id: currentMode === 'ocr' ? currentRunId : otherRunId,
+    ocr_run_id: currentMode === 'vision' ? otherRunId : currentRunId,
     vision_run_id: currentMode === 'vision' ? currentRunId : otherRunId,
     gross_sf_delta: grossDelta,
     ceiling_sf_delta: ceilingDelta,

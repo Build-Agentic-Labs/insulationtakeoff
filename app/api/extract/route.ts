@@ -84,20 +84,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find document for this project
+    // Find or auto-create document for this project
     const { data: docs } = await supabaseAdmin
       .from('documents')
       .select('id')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false })
       .limit(1);
-    const documentId = docs?.[0]?.id;
+    let documentId = docs?.[0]?.id;
 
+    // Auto-create document row if none exists (legacy upload flow only sets project.pdf_url)
     if (!documentId) {
-      return NextResponse.json(
-        { error: 'No document found for project' },
-        { status: 400 }
-      );
+      const { data: newDoc, error: docError } = await supabaseAdmin
+        .from('documents')
+        .insert({
+          project_id: projectId,
+          name: project.name || 'Uploaded PDF',
+          file_url: project.pdf_url,
+          file_type: 'application/pdf',
+          file_size: 0,
+        })
+        .select('id')
+        .single();
+      if (docError || !newDoc) {
+        return NextResponse.json(
+          { error: 'Failed to create document record' },
+          { status: 500 }
+        );
+      }
+      documentId = newDoc.id;
     }
 
     // Idempotency: check or create run
@@ -246,28 +261,32 @@ async function storeExtractedData(projectId: string, data: InsulationExtractionD
   const wallComposition = data.wall_sections?.[0]?.composition || null;
   const studSize = data.wall_sections?.[0]?.stud_size || null;
 
-  // Create main living area room if present
-  if (data.total_living_area_sqft) {
-    await supabaseAdmin
+  // Create main living area room if we have area OR wall data
+  const hasLivingData = data.total_living_area_sqft || data.gross_wall_sf || data.exterior_wall_length_ft;
+  if (hasLivingData) {
+    const { error: roomErr } = await supabaseAdmin
       .from('rooms')
       .insert({
         project_id: projectId,
         name: 'Main Living Area',
         type: 'living',
-        area_sqft: data.total_living_area_sqft,
-        height_ft: data.wall_height_ft,
-        perimeter_ft: data.exterior_wall_length_ft,
-        wall_sf: data.gross_wall_sf,
-        floor_sf: data.floor_sf,
-        ceiling_sf: data.ceiling_sf,
+        area_sqft: data.total_living_area_sqft || null,
+        height_ft: data.wall_height_ft || null,
+        perimeter_ft: data.exterior_wall_length_ft || null,
+        wall_sf: data.gross_wall_sf || null,
+        floor_sf: data.floor_sf || null,
+        ceiling_sf: data.ceiling_sf || null,
         wall_composition: wallComposition,
         stud_size: studSize,
       });
+    if (roomErr) {
+      console.error('Failed to insert Main Living Area room:', roomErr);
+    }
   }
 
   // Create garage room if present
   if (data.garage_area_sqft) {
-    await supabaseAdmin
+    const { error: garageErr } = await supabaseAdmin
       .from('rooms')
       .insert({
         project_id: projectId,
@@ -276,9 +295,13 @@ async function storeExtractedData(projectId: string, data: InsulationExtractionD
         area_sqft: data.garage_area_sqft,
         height_ft: data.wall_height_ft,
       });
+    if (garageErr) {
+      console.error('Failed to insert Garage room:', garageErr);
+    }
   }
 
   // Store individual rooms (skip duplicates of main/garage)
+  let roomsInserted = hasLivingData ? 1 : 0;
   if (data.rooms && Array.isArray(data.rooms)) {
     for (const extractedRoom of data.rooms) {
       if (!extractedRoom.area_sqft && !extractedRoom.length_ft && !extractedRoom.width_ft) {
@@ -294,7 +317,7 @@ async function storeExtractedData(projectId: string, data: InsulationExtractionD
         continue;
       }
 
-      await supabaseAdmin
+      const { error: indRoomErr } = await supabaseAdmin
         .from('rooms')
         .insert({
           project_id: projectId,
@@ -302,13 +325,19 @@ async function storeExtractedData(projectId: string, data: InsulationExtractionD
           type: extractedRoom.type || 'living',
           area_sqft: extractedRoom.area_sqft,
         });
+      if (indRoomErr) {
+        console.error(`Failed to insert room "${extractedRoom.name}":`, indRoomErr);
+      } else {
+        roomsInserted++;
+      }
     }
   }
 
   // Store doors in openings table
+  let openingsInserted = 0;
   if (data.doors && Array.isArray(data.doors)) {
     for (const door of data.doors) {
-      await supabaseAdmin
+      const { error: doorErr } = await supabaseAdmin
         .from('openings')
         .insert({
           project_id: projectId,
@@ -320,13 +349,18 @@ async function storeExtractedData(projectId: string, data: InsulationExtractionD
           count: door.count || 1,
           confidence: data.confidence,
         });
+      if (doorErr) {
+        console.error(`Failed to insert door "${door.label}":`, doorErr);
+      } else {
+        openingsInserted++;
+      }
     }
   }
 
   // Store windows in openings table
   if (data.windows && Array.isArray(data.windows)) {
     for (const window of data.windows) {
-      await supabaseAdmin
+      const { error: winErr } = await supabaseAdmin
         .from('openings')
         .insert({
           project_id: projectId,
@@ -338,6 +372,13 @@ async function storeExtractedData(projectId: string, data: InsulationExtractionD
           count: window.count || 1,
           confidence: data.confidence,
         });
+      if (winErr) {
+        console.error(`Failed to insert window "${window.label}":`, winErr);
+      } else {
+        openingsInserted++;
+      }
     }
   }
+
+  console.log(`storeExtractedData: persisted ${roomsInserted} rooms, ${openingsInserted} openings for project ${projectId}`);
 }

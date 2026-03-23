@@ -39,6 +39,7 @@ interface Project {
   pdf_url: string | null;
   created_at: string;
   client_id: string | null;
+  active_extraction_mode: 'ocr' | 'vision' | null;
   client: {
     id: string;
     name: string;
@@ -374,10 +375,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         </CardContent>
       </Card>
 
-      {/* Latest Extraction Run */}
+      {/* Latest Extraction Run + Source of Truth */}
       {latestRun && (
         <Card className="mb-6 border-zinc-200 dark:border-zinc-700 shadow-sm">
-          <CardContent className="py-3 px-4">
+          <CardContent className="py-3 px-4 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
@@ -416,6 +417,21 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 </div>
               </div>
               <Activity className="h-4 w-4 text-zinc-400" />
+            </div>
+            {/* Source-of-truth badge */}
+            <div className="flex items-center gap-2 pl-11">
+              <span className={`inline-flex items-center gap-1 text-[11px] font-semibold uppercase px-2 py-0.5 rounded ${
+                project?.active_extraction_mode === 'ocr'
+                  ? 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400'
+                  : project?.active_extraction_mode === 'vision'
+                    ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                    : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
+              }`}>
+                Active: {project?.active_extraction_mode?.toUpperCase() || 'Auto'}
+              </span>
+              <span className="text-[11px] text-zinc-400 font-mono">
+                run {latestRun.id.slice(0, 8)}
+              </span>
             </div>
           </CardContent>
         </Card>

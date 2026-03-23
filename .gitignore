@@ -52,3 +52,8 @@ next-env.d.ts
 
 # misc generated
 nul
+
+# Claude Canvas (auto-generated, session-specific)
+CLAUDE.md
+soul.md
+.claude/screenshots/

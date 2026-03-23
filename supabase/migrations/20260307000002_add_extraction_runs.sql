@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS extraction_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-  mode TEXT NOT NULL CHECK (mode IN ('ocr', 'vision')),
+  mode TEXT NOT NULL CHECK (mode IN ('ocr', 'vision', 'hybrid')),
   idempotency_key TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'started' CHECK (status IN ('started', 'complete', 'review', 'failed')),
   attempt INT NOT NULL DEFAULT 1,

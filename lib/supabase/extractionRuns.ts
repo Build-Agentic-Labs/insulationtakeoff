@@ -19,7 +19,7 @@ export interface StartRunResult {
 export async function startOrReturnRun(params: {
   projectId: string;
   documentId: string;
-  mode: 'ocr' | 'vision';
+  mode: 'ocr' | 'vision' | 'hybrid';
   idempotencyKey: string;
   requestJson?: Record<string, unknown>;
 }): Promise<StartRunResult> {
