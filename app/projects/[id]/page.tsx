@@ -451,11 +451,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
-            <Link href={`/projects/${project.id}/takeoff`}>
-              <Button className="w-full bg-blue-600 hover:bg-blue-500 text-white">
-                Start Takeoff →
-              </Button>
-            </Link>
+            <Button
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+              onClick={() => window.location.href = `/projects/${project.id}/takeoff`}
+            >
+              Start Takeoff →
+            </Button>
           </CardContent>
         </Card>
 

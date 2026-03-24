@@ -9,10 +9,7 @@ import { useTakeoffStore } from '@/lib/stores/takeoff-store';
 import { PageSelector } from '@/components/takeoff/PageSelector';
 import { BlueprintWorkspace } from '@/components/takeoff/BlueprintWorkspace';
 import type { VisionRegionSuggestion, TakeoffRegion, PageScore } from '@/lib/types/takeoff';
-import * as pdfjs from 'pdfjs-dist';
-
-// Configure PDF.js worker (matches the worker URL used in child components)
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+// pdfjs is loaded dynamically in triggerVisionAnalysis to avoid SSR issues
 
 export default function TakeoffPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
@@ -81,6 +78,10 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       setVisionLoading(pageIndex, true);
 
       try {
+        // Dynamically import pdfjs to avoid SSR issues
+        const pdfjs = await import('pdfjs-dist');
+        pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
         // Render the PDF page to a canvas and convert to base64
         const loadingTask = pdfjs.getDocument(pdfUrl);
         const pdf = await loadingTask.promise;
