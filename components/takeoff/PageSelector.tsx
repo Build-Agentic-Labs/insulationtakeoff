@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Check, SkipForward, ChevronRight } from 'lucide-react';
 import { useTakeoffStore } from '@/lib/stores/takeoff-store';
@@ -21,11 +22,15 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
   const togglePage = useTakeoffStore((s) => s.togglePage);
   const setPreviewPage = useTakeoffStore((s) => s.setPreviewPage);
 
+  // Track page count from the PDF itself (handles totalPages=0 on first render)
+  const [loadedPageCount, setLoadedPageCount] = useState(totalPages);
+  const effectivePageCount = loadedPageCount || totalPages;
+
   const isSelected = (pageIndex: number) => selectedPages.includes(pageIndex);
   const isAiPicked = (pageIndex: number) =>
     pageScores.find((s) => s.page_index === pageIndex)?.ai_selected ?? false;
 
-  const pageIndices = Array.from({ length: totalPages }, (_, i) => i);
+  const pageIndices = Array.from({ length: effectivePageCount }, (_, i) => i);
 
   function handleInclude() {
     if (!isSelected(previewPageIndex)) {
@@ -154,7 +159,10 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
           <div className="flex-1 overflow-auto bg-zinc-950 flex justify-center items-start p-4">
             <Document
               file={pdfUrl}
-              onLoadSuccess={(pdf) => onPdfLoaded?.(pdf.numPages)}
+              onLoadSuccess={(pdf) => {
+                setLoadedPageCount(pdf.numPages);
+                onPdfLoaded?.(pdf.numPages);
+              }}
               loading={
                 <div className="text-zinc-500 text-sm mt-16">Loading PDF…</div>
               }
