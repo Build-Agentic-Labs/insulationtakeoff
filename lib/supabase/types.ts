@@ -399,6 +399,116 @@ export interface Database {
         }
         Relationships: []
       }
+      takeoff_sessions: {
+        Row: {
+          id: string
+          project_id: string
+          document_id: string
+          status: 'in_progress' | 'completed' | 'abandoned'
+          selected_pages: number[]
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          project_id: string
+          document_id: string
+          status?: 'in_progress' | 'completed' | 'abandoned'
+          selected_pages?: number[]
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          project_id?: string
+          document_id?: string
+          status?: 'in_progress' | 'completed' | 'abandoned'
+          selected_pages?: number[]
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "takeoff_sessions_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "takeoff_sessions_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      takeoff_regions: {
+        Row: {
+          id: string
+          session_id: string
+          page_index: number
+          label: string
+          wall_type: 'exterior' | 'garage' | 'basement' | 'other'
+          source: 'ai' | 'manual'
+          status: 'pending' | 'analyzing' | 'confirmed' | 'rejected'
+          bbox: Json
+          wall_length_lf: number | null
+          wall_height_ft: number | null
+          gross_sf: number | null
+          net_sf: number | null
+          openings: Json
+          raw_ocr_result: Json | null
+          confirmed_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          page_index: number
+          label: string
+          wall_type?: 'exterior' | 'garage' | 'basement' | 'other'
+          source?: 'ai' | 'manual'
+          status?: 'pending' | 'analyzing' | 'confirmed' | 'rejected'
+          bbox: Json
+          wall_length_lf?: number | null
+          wall_height_ft?: number | null
+          gross_sf?: number | null
+          net_sf?: number | null
+          openings?: Json
+          raw_ocr_result?: Json | null
+          confirmed_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          page_index?: number
+          label?: string
+          wall_type?: 'exterior' | 'garage' | 'basement' | 'other'
+          source?: 'ai' | 'manual'
+          status?: 'pending' | 'analyzing' | 'confirmed' | 'rejected'
+          bbox?: Json
+          wall_length_lf?: number | null
+          wall_height_ft?: number | null
+          gross_sf?: number | null
+          net_sf?: number | null
+          openings?: Json
+          raw_ocr_result?: Json | null
+          confirmed_at?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "takeoff_regions_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "takeoff_sessions"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
