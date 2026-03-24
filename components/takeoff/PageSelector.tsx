@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { Check, ChevronRight, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { Check, ChevronRight, ZoomIn, ZoomOut, RotateCcw, Maximize } from 'lucide-react';
 import { useTakeoffStore } from '@/lib/stores/takeoff-store';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -22,10 +22,38 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
 
   const [loadedPageCount, setLoadedPageCount] = useState(totalPages);
   const [zoom, setZoom] = useState(1.0);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   const effectivePageCount = loadedPageCount || totalPages;
 
   const isSelected = (idx: number) => selectedPages.includes(idx);
   const pageIndices = Array.from({ length: effectivePageCount }, (_, i) => i);
+
+  // Measure the preview container so we can fit the PDF inside it
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        // Subtract padding (32px = p-4 on each side)
+        setContainerWidth(entry.contentRect.width - 32);
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // The base width that fits the PDF in the container (with some margin)
+  const fitWidth = containerWidth > 0 ? Math.min(containerWidth, 1200) : 800;
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      setZoom((z) => Math.min(3, Math.max(0.2, z + delta)));
+    }
+  }, []);
 
   return (
     <div className="flex flex-col h-full bg-zinc-950 text-zinc-100">
@@ -57,7 +85,6 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
                   </Document>
                 </div>
 
-                {/* Selected checkmark */}
                 {selected && (
                   <>
                     <div className="absolute inset-0 border-2 border-green-500 rounded pointer-events-none" />
@@ -67,7 +94,6 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
                   </>
                 )}
 
-                {/* Page number */}
                 <div className="absolute bottom-0 left-0 right-0 bg-zinc-950/80 text-center text-zinc-400 text-[10px] py-0.5">
                   {idx + 1}
                 </div>
@@ -88,26 +114,26 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
               {/* Zoom controls */}
               <div className="flex items-center gap-1 mr-3">
                 <button
-                  onClick={() => setZoom((z) => Math.max(0.3, z - 0.25))}
-                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white"
+                  onClick={() => setZoom((z) => Math.max(0.2, z - 0.15))}
+                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
                   title="Zoom out"
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
-                <span className="text-xs text-zinc-500 w-10 text-center">{Math.round(zoom * 100)}%</span>
+                <span className="text-xs text-zinc-500 w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
                 <button
-                  onClick={() => setZoom((z) => Math.min(3, z + 0.25))}
-                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white"
+                  onClick={() => setZoom((z) => Math.min(3, z + 0.15))}
+                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
                   title="Zoom in"
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setZoom(1.0)}
-                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white"
-                  title="Reset zoom"
+                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+                  title="Fit to view"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
+                  <Maximize className="w-3.5 h-3.5" />
                 </button>
               </div>
 
@@ -133,9 +159,21 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
             </div>
           </div>
 
-          {/* PDF preview with zoom */}
-          <div className="flex-1 overflow-auto bg-zinc-950 flex justify-center items-start p-4">
-            <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}>
+          {/* PDF preview — scrollable container with zoom */}
+          <div
+            ref={containerRef}
+            className="flex-1 overflow-auto bg-zinc-950"
+            onWheel={handleWheel}
+          >
+            <div
+              className="flex justify-center p-4"
+              style={{
+                transform: `scale(${zoom})`,
+                transformOrigin: 'top center',
+                width: `${100 / zoom}%`,
+                minHeight: `${100 / zoom}%`,
+              }}
+            >
               <Document
                 file={pdfUrl}
                 onLoadSuccess={(pdf) => {
@@ -147,6 +185,7 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
               >
                 <Page
                   pageNumber={previewPageIndex + 1}
+                  width={fitWidth}
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
                   className="shadow-xl"
