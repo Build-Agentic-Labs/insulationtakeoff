@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState, useEffect, useCallback } from 'react';
+import { use, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
@@ -57,9 +57,11 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     loadDocument();
   }, [projectId]);
 
-  // ── Initialize page scores once totalPages is known ──────────────────────────
+  // ── Initialize page scores ONCE when totalPages is first known ───────────────
+  const scoresInitializedRef = useRef(false);
   useEffect(() => {
-    if (totalPages > 0) {
+    if (totalPages > 0 && !scoresInitializedRef.current) {
+      scoresInitializedRef.current = true;
       const scores: PageScore[] = Array.from({ length: totalPages }, (_, i) => ({
         page_index: i,
         score: 0.5,

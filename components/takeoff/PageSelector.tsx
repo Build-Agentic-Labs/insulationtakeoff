@@ -24,6 +24,7 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
   const [zoom, setZoom] = useState(1.0);
   const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pdfLoadedRef = useRef(false);
   const effectivePageCount = loadedPageCount || totalPages;
 
   const isSelected = (idx: number) => selectedPages.includes(idx);
@@ -177,8 +178,11 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
               <Document
                 file={pdfUrl}
                 onLoadSuccess={(pdf) => {
-                  setLoadedPageCount(pdf.numPages);
-                  onPdfLoaded?.(pdf.numPages);
+                  if (!pdfLoadedRef.current) {
+                    pdfLoadedRef.current = true;
+                    setLoadedPageCount(pdf.numPages);
+                    onPdfLoaded?.(pdf.numPages);
+                  }
                 }}
                 loading={<div className="text-zinc-500 text-sm mt-16">Loading PDF…</div>}
                 error={<div className="text-red-400 text-sm mt-16">Failed to load PDF.</div>}
