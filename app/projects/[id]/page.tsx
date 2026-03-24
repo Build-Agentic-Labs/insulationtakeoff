@@ -439,6 +439,26 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
       {/* Action Cards */}
       <div className={`grid gap-4 mb-6 ${project.status === 'manual' || !project.pdf_url ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
+        {/* Start Takeoff Card */}
+        <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm hover:border-primary hover:shadow-md transition-all flex flex-col bg-gradient-to-br from-blue-50 to-blue-50/50 dark:from-blue-950/20 dark:to-blue-950/10">
+          <CardHeader className="flex-1 pb-3">
+            <FileCheck className="h-8 w-8 mb-2 text-blue-600 dark:text-blue-400" />
+            <CardTitle className="text-blue-900 dark:text-blue-100">
+              Start Takeoff
+            </CardTitle>
+            <CardDescription className="text-blue-700 dark:text-blue-200">
+              Begin creating your insulation takeoff quote
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <Link href={`/projects/${project.id}/takeoff`}>
+              <Button className="w-full bg-blue-600 hover:bg-blue-500 text-white">
+                Start Takeoff →
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+
         {/* Only show extraction card if project has a source file */}
         {project.pdf_url && (
           <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm hover:border-primary hover:shadow-md transition-all flex flex-col">
