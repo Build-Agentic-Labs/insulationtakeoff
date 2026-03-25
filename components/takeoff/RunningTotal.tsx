@@ -8,7 +8,17 @@ interface RunningTotalProps {
 }
 
 export function RunningTotal({ onGenerateQuote }: RunningTotalProps) {
-  const total = useTakeoffStore((s) => s.getRunningTotal());
+  // Subscribe to the individual values instead of calling getRunningTotal()
+  // (which returns a new object each render, causing infinite loops with Zustand)
+  const session = useTakeoffStore((s) => s.session);
+  const confirmed = session?.regions.filter((r) => r.status === 'confirmed') ?? [];
+  const nonRejected = session?.regions.filter((r) => r.status !== 'rejected') ?? [];
+  const total = {
+    gross_sf: confirmed.reduce((sum, r) => sum + (r.gross_sf ?? 0), 0),
+    net_sf: confirmed.reduce((sum, r) => sum + (r.net_sf ?? 0), 0),
+    region_count: nonRejected.length,
+    confirmed_count: confirmed.length,
+  };
   const progress = total.region_count > 0
     ? (total.confirmed_count / total.region_count) * 100
     : 0;
