@@ -154,7 +154,9 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
   // ── Page selection confirmed ─────────────────────────────────────────────────
   const handleConfirmPageSelection = useCallback(async () => {
-    if (!documentId || selectedPages.length === 0) return;
+    // Read fresh from store (PageSelector.handleConfirm syncs just before calling this)
+    const currentSelectedPages = useTakeoffStore.getState().selectedPages;
+    if (!documentId || currentSelectedPages.length === 0) return;
 
     try {
       const { data: sessionData } = await supabase
@@ -163,7 +165,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
           project_id: projectId,
           document_id: documentId,
           status: 'in_progress',
-          selected_pages: selectedPages,
+          selected_pages: currentSelectedPages,
         })
         .select()
         .single();
