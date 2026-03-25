@@ -13,9 +13,9 @@ export function ToolBar({ onZoomIn, onZoomOut }: ToolBarProps) {
   const setTool = useTakeoffStore((s) => s.setTool);
 
   const activeClass =
-    'bg-blue-600/20 border-blue-500 text-blue-400';
+    'bg-blue-50 border-blue-500 text-blue-600';
   const inactiveClass =
-    'bg-zinc-900 border-zinc-700 text-zinc-500 hover:border-zinc-600 hover:text-zinc-400';
+    'bg-zinc-50 border-zinc-200 text-zinc-500 hover:border-zinc-200 hover:text-zinc-500';
 
   return (
     <div className="flex items-center gap-1">
@@ -44,7 +44,7 @@ export function ToolBar({ onZoomIn, onZoomOut }: ToolBarProps) {
       </button>
 
       {/* Divider */}
-      <div className="w-px h-4 bg-zinc-700 mx-1" />
+      <div className="w-px h-4 bg-zinc-200 mx-1" />
 
       {/* Zoom out */}
       <button

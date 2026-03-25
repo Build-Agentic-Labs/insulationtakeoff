@@ -17,29 +17,29 @@ export function RegionCard({ region, onClick }: RegionCardProps) {
   return (
     <button
       onClick={onClick}
-      className={`w-full rounded-lg bg-zinc-900 border px-4 py-3 transition-all text-left hover:bg-zinc-800 ${borderColor}`}
+      className={`w-full rounded-lg bg-zinc-50 border px-4 py-3 transition-all text-left hover:bg-zinc-100 ${borderColor}`}
     >
       <div className="flex items-start justify-between gap-3">
         {/* Left: Label + Dimensions */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
-            <h3 className="text-sm font-semibold text-zinc-100 truncate">
+            <h3 className="text-sm font-semibold text-zinc-900 truncate">
               {region.label}
             </h3>
             {isConfirmed ? (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-green-500/20 text-green-400 shrink-0">
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-green-50 text-green-400 shrink-0">
                 <CheckCircle2 className="h-3 w-3" />
                 Done
               </span>
             ) : (
-              <span className="inline-flex text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 shrink-0">
+              <span className="inline-flex text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-600 shrink-0">
                 Analyze →
               </span>
             )}
           </div>
 
           {isConfirmed ? (
-            <p className="text-xs text-zinc-400 mb-2">
+            <p className="text-xs text-zinc-500 mb-2">
               {region.wall_length_lf?.toFixed(1)}' LF × {region.wall_height_ft?.toFixed(1)}'
             </p>
           ) : (
@@ -56,7 +56,7 @@ export function RegionCard({ region, onClick }: RegionCardProps) {
               <p className="text-lg font-semibold text-white tabular-nums">
                 {Math.round(region.net_sf ?? 0).toLocaleString()}
               </p>
-              <p className="text-[10px] text-zinc-400 mt-0.5">
+              <p className="text-[10px] text-zinc-500 mt-0.5">
                 {region.openings.length} opening{region.openings.length !== 1 ? 's' : ''}
               </p>
             </>

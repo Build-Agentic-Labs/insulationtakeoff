@@ -24,7 +24,7 @@ export function RunningTotal({ onGenerateQuote }: RunningTotalProps) {
     : 0;
 
   return (
-    <div className="border-t border-zinc-800 p-4 bg-zinc-900/50 space-y-3">
+    <div className="border-t border-zinc-200 p-4 bg-zinc-50 space-y-3">
       {/* Label + Net SF */}
       <div>
         <p className="text-xs text-zinc-500 mb-1">Running Total</p>
@@ -35,12 +35,12 @@ export function RunningTotal({ onGenerateQuote }: RunningTotalProps) {
       </div>
 
       {/* Regions confirmed */}
-      <p className="text-xs text-zinc-400">
+      <p className="text-xs text-zinc-500">
         {total.confirmed_count} of {total.region_count} regions confirmed
       </p>
 
       {/* Progress bar */}
-      <div className="h-px bg-zinc-800 rounded overflow-hidden">
+      <div className="h-px bg-zinc-100 rounded overflow-hidden">
         <div
           className="h-full bg-green-500 transition-all duration-300"
           style={{ width: `${progress}%` }}

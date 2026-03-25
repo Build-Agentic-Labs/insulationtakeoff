@@ -124,26 +124,26 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
       onClick={handleOverlayClick}
     >
       <div
-        className="w-[420px] max-h-[90vh] flex flex-col bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden"
+        className="w-[420px] max-h-[90vh] flex flex-col bg-zinc-50 border border-zinc-200 rounded-xl shadow-2xl overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby="region-modal-title"
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-zinc-800 shrink-0">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-zinc-200 shrink-0">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h2
                 id="region-modal-title"
-                className="text-sm font-semibold text-zinc-100 truncate"
+                className="text-sm font-semibold text-zinc-900 truncate"
               >
                 {label}
               </h2>
-              <span className="inline-flex text-[10px] font-semibold px-2 py-0.5 rounded bg-zinc-700 text-zinc-300 shrink-0 uppercase tracking-wide">
+              <span className="inline-flex text-[10px] font-semibold px-2 py-0.5 rounded bg-zinc-100 text-zinc-700 shrink-0 uppercase tracking-wide">
                 {source === 'ai' ? 'AI' : 'Manual'}
               </span>
             </div>
@@ -156,7 +156,7 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
           </button>
           <button
             onClick={closeModal}
-            className="shrink-0 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+            className="shrink-0 p-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200 transition-colors"
             aria-label="Close modal"
           >
             <X className="h-4 w-4" />
@@ -167,8 +167,8 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
           {loadState === 'loading' && (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
-              <Loader2 className="h-7 w-7 text-blue-400 animate-spin" />
-              <p className="text-sm text-zinc-400">Analyzing region&hellip;</p>
+              <Loader2 className="h-7 w-7 text-blue-600 animate-spin" />
+              <p className="text-sm text-zinc-500">Analyzing region&hellip;</p>
             </div>
           )}
 
@@ -188,7 +188,7 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
             <>
               {/* Stats grid */}
               <div className="grid grid-cols-3 gap-2">
-                <div className="bg-zinc-800 rounded-lg px-3 py-3 text-center">
+                <div className="bg-zinc-100 rounded-lg px-3 py-3 text-center">
                   <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Length LF</p>
                   {editMode ? (
                     <input
@@ -198,7 +198,7 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
                       value={lengthInput}
                       onChange={(e) => setLengthInput(e.target.value)}
                       onBlur={handleLengthBlur}
-                      className="w-full text-center text-base font-semibold text-white bg-zinc-700 border border-zinc-600 rounded px-1 py-0.5 focus:outline-none focus:border-blue-500"
+                      className="w-full text-center text-base font-semibold text-white bg-zinc-100 border border-zinc-200 rounded px-1 py-0.5 focus:outline-none focus:border-blue-500"
                     />
                   ) : (
                     <p className="text-base font-semibold text-white tabular-nums">
@@ -206,13 +206,13 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
                     </p>
                   )}
                 </div>
-                <div className="bg-zinc-800 rounded-lg px-3 py-3 text-center">
+                <div className="bg-zinc-100 rounded-lg px-3 py-3 text-center">
                   <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Height</p>
                   <p className="text-base font-semibold text-white tabular-nums">
                     {heightIsSelected ? `${effectiveHeight}'` : '—'}
                   </p>
                 </div>
-                <div className="bg-zinc-800 rounded-lg px-3 py-3 text-center">
+                <div className="bg-zinc-100 rounded-lg px-3 py-3 text-center">
                   <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Gross SF</p>
                   <p className="text-base font-semibold text-white tabular-nums">
                     {heightIsSelected ? Math.round(grossSf).toLocaleString() : '—'}
@@ -222,7 +222,7 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
 
               {/* Height selector */}
               <div>
-                <p className="text-xs font-medium text-zinc-400 mb-2">
+                <p className="text-xs font-medium text-zinc-500 mb-2">
                   Wall Height
                   {!heightIsSelected && (
                     <span className="ml-2 text-zinc-500 font-normal">(not detected — please select)</span>
@@ -238,7 +238,7 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
                         className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
                           isActive
                             ? 'bg-blue-600 border-blue-500 text-white'
-                            : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100'
+                            : 'bg-zinc-100 border-zinc-200 text-zinc-700 hover:border-zinc-200 hover:text-zinc-900'
                         }`}
                       >
                         {h}&apos;
@@ -252,10 +252,10 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
                     placeholder="Custom"
                     value={customHeight}
                     onChange={(e) => handleCustomHeightChange(e.target.value)}
-                    className={`w-24 text-sm px-3 py-2 rounded-lg border bg-zinc-800 text-zinc-100 placeholder-zinc-600 focus:outline-none transition-colors ${
+                    className={`w-24 text-sm px-3 py-2 rounded-lg border bg-zinc-100 text-zinc-900 placeholder-zinc-600 focus:outline-none transition-colors ${
                       useCustomHeight && customHeight !== ''
                         ? 'border-blue-500'
-                        : 'border-zinc-700 focus:border-zinc-500'
+                        : 'border-zinc-200 focus:border-zinc-200'
                     }`}
                   />
                 </div>
@@ -264,20 +264,20 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
               {/* Openings list */}
               {openings.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-zinc-400 mb-2">Openings</p>
+                  <p className="text-xs font-medium text-zinc-500 mb-2">Openings</p>
                   <div className="space-y-1.5">
                     {openings.map((opening) => (
                       <div
                         key={opening.id}
-                        className="flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700"
+                        className="flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-100 border border-zinc-200"
                       >
                         <div className="flex items-center gap-2">
                           {opening.type === 'door' ? (
-                            <DoorOpen className="h-4 w-4 text-zinc-400 shrink-0" />
+                            <DoorOpen className="h-4 w-4 text-zinc-500 shrink-0" />
                           ) : (
-                            <RectangleHorizontal className="h-4 w-4 text-zinc-400 shrink-0" />
+                            <RectangleHorizontal className="h-4 w-4 text-zinc-500 shrink-0" />
                           )}
-                          <span className="text-sm text-zinc-200">{opening.label}</span>
+                          <span className="text-sm text-zinc-700">{opening.label}</span>
                         </div>
                         <span className="text-sm font-semibold text-red-400 tabular-nums">
                           -{opening.area_sf.toFixed(1)} SF
@@ -289,7 +289,7 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
               )}
 
               {/* NET result */}
-              <div className="rounded-xl bg-green-500/5 border border-green-500/20 px-5 py-4 text-center">
+              <div className="rounded-xl bg-green-50 border border-green-200 px-5 py-4 text-center">
                 <p className="text-[10px] text-green-400/70 uppercase tracking-widest mb-1">Net Insulation SF</p>
                 <p className="text-4xl font-bold text-green-400 tabular-nums">
                   {heightIsSelected ? Math.round(netSf).toLocaleString() : '—'}
@@ -306,13 +306,13 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
 
         {/* Footer */}
         {loadState === 'ready' && (
-          <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-zinc-800 shrink-0">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-zinc-200 shrink-0">
             <button
               onClick={() => setEditMode((prev) => !prev)}
               className={`text-sm font-semibold px-4 py-2 rounded-lg border transition-colors ${
                 editMode
-                  ? 'bg-zinc-700 border-zinc-600 text-zinc-100'
-                  : 'bg-transparent border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+                  ? 'bg-zinc-100 border-zinc-200 text-zinc-900'
+                  : 'bg-transparent border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:border-zinc-200'
               }`}
             >
               {editMode ? 'Done Editing' : 'Edit Values'}

@@ -135,11 +135,11 @@ export function BlueprintWorkspace({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full bg-zinc-950">
+    <div className="flex h-full bg-white">
       {/* ── Left: blueprint area ─────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar: page tabs + toolbar */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-900/60 shrink-0">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 bg-zinc-50 shrink-0">
           {/* Page tabs */}
           <div className="flex items-center gap-1">
             {selectedPages.map((pageIndex) => {
@@ -150,8 +150,8 @@ export function BlueprintWorkspace({
                   onClick={() => setActivePage(pageIndex)}
                   className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
                     isActive
-                      ? 'bg-blue-600/15 text-blue-400 border-blue-600/40'
-                      : 'bg-transparent text-zinc-500 border-transparent hover:text-zinc-300 hover:border-zinc-700'
+                      ? 'bg-blue-50 text-blue-600 border-blue-300'
+                      : 'bg-transparent text-zinc-500 border-transparent hover:text-zinc-700 hover:border-zinc-200'
                   }`}
                 >
                   Page {pageIndex + 1}
@@ -165,7 +165,7 @@ export function BlueprintWorkspace({
         </div>
 
         {/* Blueprint canvas */}
-        <div className="flex-1 overflow-auto flex items-center justify-center bg-zinc-950 p-6">
+        <div className="flex-1 overflow-auto flex items-center justify-center bg-white p-6">
           <div
             className="relative"
             style={{ transform: `scale(${scale})`, transformOrigin: 'top center' }}
@@ -199,9 +199,9 @@ export function BlueprintWorkspace({
 
                 {/* Vision loading spinner overlay */}
                 {isVisionLoading && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/60 backdrop-blur-[1px] rounded">
-                    <Loader2 className="h-8 w-8 text-blue-400 animate-spin mb-2" />
-                    <p className="text-xs text-zinc-400">Analyzing blueprint…</p>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[1px] rounded">
+                    <Loader2 className="h-8 w-8 text-blue-600 animate-spin mb-2" />
+                    <p className="text-xs text-zinc-500">Analyzing blueprint…</p>
                   </div>
                 )}
               </div>
@@ -211,10 +211,10 @@ export function BlueprintWorkspace({
       </div>
 
       {/* ── Right: regions panel ──────────────────────────────────────────── */}
-      <div className="w-[240px] flex flex-col border-l border-zinc-800 bg-zinc-900/40 shrink-0">
+      <div className="w-[240px] flex flex-col border-l border-zinc-200 bg-zinc-50 shrink-0">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
-          <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+        <div className="px-4 py-3 border-b border-zinc-200 shrink-0">
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
             Wall Regions
           </h2>
         </div>
@@ -237,10 +237,10 @@ export function BlueprintWorkspace({
         </div>
 
         {/* Draw custom region */}
-        <div className="px-3 py-2 border-t border-zinc-800 shrink-0">
+        <div className="px-3 py-2 border-t border-zinc-200 shrink-0">
           <button
             onClick={() => setTool('rectangle')}
-            className="w-full text-xs font-medium text-zinc-500 hover:text-zinc-300 border border-dashed border-zinc-700 hover:border-zinc-500 rounded-lg py-2 transition-colors"
+            className="w-full text-xs font-medium text-zinc-500 hover:text-zinc-700 border border-dashed border-zinc-200 hover:border-zinc-200 rounded-lg py-2 transition-colors"
           >
             + Draw custom region
           </button>
