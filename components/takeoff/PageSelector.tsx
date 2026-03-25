@@ -2,7 +2,9 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { Check, ChevronRight, ZoomIn, ZoomOut, RotateCcw, Maximize } from 'lucide-react';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
+import { Check, ChevronRight, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 import { useTakeoffStore } from '@/lib/stores/takeoff-store';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -15,29 +17,29 @@ interface PageSelectorProps {
 }
 
 export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: PageSelectorProps) {
-  const selectedPages = useTakeoffStore((s) => s.selectedPages);
-  const previewPageIndex = useTakeoffStore((s) => s.previewPageIndex);
-  const togglePage = useTakeoffStore((s) => s.togglePage);
-  const setPreviewPage = useTakeoffStore((s) => s.setPreviewPage);
-
-  const [loadedPageCount, setLoadedPageCount] = useState(totalPages);
+  // Local state — NOT from the store for selection (avoids the reset bug)
+  const [localSelectedPages, setLocalSelectedPages] = useState<number[]>([]);
+  const [previewIdx, setPreviewIdx] = useState(0);
   const [zoom, setZoom] = useState(1.0);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [pageCount, setPageCount] = useState(totalPages);
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfLoadedRef = useRef(false);
-  const effectivePageCount = loadedPageCount || totalPages;
 
-  const isSelected = (idx: number) => selectedPages.includes(idx);
+  const effectivePageCount = pageCount || totalPages;
   const pageIndices = Array.from({ length: effectivePageCount }, (_, i) => i);
+  const isSelected = (idx: number) => localSelectedPages.includes(idx);
 
-  // Measure the preview container so we can fit the PDF inside it
+  // Sync store on confirm (not on every toggle)
+  const setPageScores = useTakeoffStore((s) => s.setPageScores);
+  const confirmPageSelection = useTakeoffStore((s) => s.confirmPageSelection);
+
+  // Measure preview container
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        // Subtract padding (32px = p-4 on each side)
         setContainerWidth(entry.contentRect.width - 32);
       }
     });
@@ -45,8 +47,27 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
     return () => observer.disconnect();
   }, []);
 
-  // The base width that fits the PDF in the container (with some margin)
   const fitWidth = containerWidth > 0 ? Math.min(containerWidth, 1200) : 800;
+
+  const togglePage = useCallback((idx: number) => {
+    setLocalSelectedPages((prev) =>
+      prev.includes(idx)
+        ? prev.filter((p) => p !== idx)
+        : [...prev, idx].sort((a, b) => a - b)
+    );
+  }, []);
+
+  const handleConfirm = useCallback(() => {
+    // Push selection into store only at confirm time
+    const scores = pageIndices.map((i) => ({
+      page_index: i,
+      score: 0.5,
+      label: `Page ${i + 1}`,
+      ai_selected: localSelectedPages.includes(i),
+    }));
+    setPageScores(scores);
+    onConfirm();
+  }, [pageIndices, localSelectedPages, setPageScores, onConfirm]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -56,6 +77,14 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
     }
   }, []);
 
+  const handlePdfLoaded = useCallback((numPages: number) => {
+    if (!pdfLoadedRef.current) {
+      pdfLoadedRef.current = true;
+      setPageCount(numPages);
+      onPdfLoaded?.(numPages);
+    }
+  }, [onPdfLoaded]);
+
   return (
     <div className="flex flex-col h-full bg-zinc-950 text-zinc-100">
       <div className="flex flex-1 overflow-hidden">
@@ -64,12 +93,12 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
           <div className="text-[9px] text-zinc-500 uppercase tracking-widest px-1 mb-1">Pages</div>
           {pageIndices.map((idx) => {
             const selected = isSelected(idx);
-            const previewing = previewPageIndex === idx;
+            const previewing = previewIdx === idx;
 
             return (
               <button
                 key={idx}
-                onClick={() => setPreviewPage(idx)}
+                onClick={() => setPreviewIdx(idx)}
                 className={[
                   'relative rounded overflow-hidden flex-shrink-0 focus:outline-none transition-all',
                   previewing ? 'ring-2 ring-blue-500' : 'ring-1 ring-zinc-700 hover:ring-zinc-500',
@@ -105,14 +134,14 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
 
         {/* Preview */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Header with controls */}
+          {/* Header */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
             <span className="text-sm text-zinc-300 font-medium">
-              Page {previewPageIndex + 1} of {effectivePageCount}
+              Page {previewIdx + 1} of {effectivePageCount}
             </span>
 
             <div className="flex items-center gap-2">
-              {/* Zoom controls */}
+              {/* Zoom */}
               <div className="flex items-center gap-1 mr-3">
                 <button
                   onClick={() => setZoom((z) => Math.max(0.2, z - 0.15))}
@@ -138,17 +167,17 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
                 </button>
               </div>
 
-              {/* Include/Exclude toggle */}
+              {/* Include toggle */}
               <button
-                onClick={() => togglePage(previewPageIndex)}
+                onClick={() => togglePage(previewIdx)}
                 className={[
                   'px-4 py-1.5 text-sm rounded font-medium transition-colors',
-                  isSelected(previewPageIndex)
+                  isSelected(previewIdx)
                     ? 'bg-green-600 text-white hover:bg-green-500'
                     : 'bg-blue-600 text-white hover:bg-blue-500',
                 ].join(' ')}
               >
-                {isSelected(previewPageIndex) ? (
+                {isSelected(previewIdx) ? (
                   <span className="flex items-center gap-1.5">
                     <Check className="w-3.5 h-3.5" />
                     Included — click to remove
@@ -160,7 +189,7 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
             </div>
           </div>
 
-          {/* PDF preview — scrollable container with zoom */}
+          {/* PDF preview */}
           <div
             ref={containerRef}
             className="flex-1 overflow-auto bg-zinc-950"
@@ -177,18 +206,12 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
             >
               <Document
                 file={pdfUrl}
-                onLoadSuccess={(pdf) => {
-                  if (!pdfLoadedRef.current) {
-                    pdfLoadedRef.current = true;
-                    setLoadedPageCount(pdf.numPages);
-                    onPdfLoaded?.(pdf.numPages);
-                  }
-                }}
+                onLoadSuccess={(pdf) => handlePdfLoaded(pdf.numPages)}
                 loading={<div className="text-zinc-500 text-sm mt-16">Loading PDF…</div>}
                 error={<div className="text-red-400 text-sm mt-16">Failed to load PDF.</div>}
               >
                 <Page
-                  pageNumber={previewPageIndex + 1}
+                  pageNumber={previewIdx + 1}
                   width={fitWidth}
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
@@ -203,22 +226,22 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
       {/* Bottom bar */}
       <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-900 px-6 py-3 flex items-center justify-between">
         <span className="text-sm text-zinc-400">
-          {selectedPages.length === 0
+          {localSelectedPages.length === 0
             ? 'No pages selected — click "Include this page" on pages you need'
-            : `${selectedPages.length} page${selectedPages.length !== 1 ? 's' : ''} selected: ${selectedPages.map((p) => p + 1).join(', ')}`}
+            : `${localSelectedPages.length} page${localSelectedPages.length !== 1 ? 's' : ''} selected: ${localSelectedPages.map((p) => p + 1).join(', ')}`}
         </span>
 
         <button
-          onClick={onConfirm}
-          disabled={selectedPages.length === 0}
+          onClick={handleConfirm}
+          disabled={localSelectedPages.length === 0}
           className={[
             'flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-colors',
-            selectedPages.length === 0
+            localSelectedPages.length === 0
               ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
               : 'bg-blue-600 text-white hover:bg-blue-500',
           ].join(' ')}
         >
-          Continue with {selectedPages.length} page{selectedPages.length !== 1 ? 's' : ''}
+          Continue with {localSelectedPages.length} page{localSelectedPages.length !== 1 ? 's' : ''}
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
