@@ -28,7 +28,7 @@ export function RunningTotal({ onGenerateQuote }: RunningTotalProps) {
       {/* Label + Net SF */}
       <div>
         <p className="text-xs text-zinc-500 mb-1">Running Total</p>
-        <p className="text-3xl font-bold text-white tabular-nums">
+        <p className="text-3xl font-bold text-zinc-900 tabular-nums">
           {Math.round(total.net_sf).toLocaleString()}
         </p>
         <p className="text-[10px] text-zinc-500 mt-0.5">net SF</p>
