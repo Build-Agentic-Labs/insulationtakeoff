@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 
-const PDFENGINE_URL = process.env.PDFENGINE_URL ?? 'http://178.104.21.251:8000';
+const PDFENGINE_URL = process.env.PDFENGINE_URL ?? '';
+const USE_MOCK = !PDFENGINE_URL;
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,7 +15,66 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get document PDF URL from Supabase
+    // Mock mode: return realistic fake data so the UI is fully testable
+    if (USE_MOCK) {
+      const wallWidth = bbox.width * 0.6; // rough estimate from bbox
+      const mockLength = Math.round(8 + Math.random() * 30); // 8-38 LF
+      const mockHeight = [8, 9, 10][Math.floor(Math.random() * 3)];
+      const grossSf = mockLength * mockHeight;
+      const doorArea = 3 * 6.8; // standard door
+      const windowArea = 3 * 4; // standard window
+      const hasDoor = Math.random() > 0.4;
+      const hasWindow = Math.random() > 0.3;
+      const openingsArea = (hasDoor ? doorArea : 0) + (hasWindow ? windowArea : 0);
+
+      return NextResponse.json({
+        detected_dimensions: [
+          {
+            id: crypto.randomUUID(),
+            value_ft: mockLength,
+            raw_text: `${mockLength}'-0"`,
+            confidence: 0.85 + Math.random() * 0.1,
+            position: { x: 30, y: 50 },
+            selected: true,
+          },
+        ],
+        suggested_wall_length_lf: mockLength,
+        detected_height_ft: mockHeight,
+        openings: [
+          ...(hasDoor
+            ? [
+                {
+                  id: crypto.randomUUID(),
+                  type: 'door' as const,
+                  width_ft: 3,
+                  height_ft: 6.8,
+                  area_sf: doorArea,
+                  confidence: 0.9,
+                  label: "3'-0\" × 6'-8\" Door",
+                },
+              ]
+            : []),
+          ...(hasWindow
+            ? [
+                {
+                  id: crypto.randomUUID(),
+                  type: 'window' as const,
+                  width_ft: 3,
+                  height_ft: 4,
+                  area_sf: windowArea,
+                  confidence: 0.85,
+                  label: "3'-0\" × 4'-0\" Window",
+                },
+              ]
+            : []),
+        ],
+        gross_sf: grossSf,
+        net_sf: Math.max(0, grossSf - openingsArea),
+        confidence: 0.82,
+      });
+    }
+
+    // Production mode: call pdfengine
     const supabase = supabaseAdmin;
     const { data: doc, error: docErr } = await supabase
       .from('documents')
@@ -26,7 +86,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
 
-    // Call pdfengine region analysis endpoint
     const res = await fetch(`${PDFENGINE_URL}/takeoff/analyze-region`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

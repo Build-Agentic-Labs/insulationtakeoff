@@ -2,22 +2,48 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
-import { Check, ChevronRight, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { Check, ChevronRight, ZoomIn, ZoomOut, Maximize, Loader2, Sparkles } from 'lucide-react';
 import { useTakeoffStore } from '@/lib/stores/takeoff-store';
+import type { PageScore } from '@/lib/types/takeoff';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface PageSelectorProps {
   pdfUrl: string;
   totalPages: number;
+  pageScores: PageScore[];
+  isClassifying: boolean;
+  classificationDone: boolean;
   onConfirm: () => void;
   onPdfLoaded?: (numPages: number) => void;
 }
 
-export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: PageSelectorProps) {
-  // Local state — NOT from the store for selection (avoids the reset bug)
+// Page type badge colors
+const PAGE_TYPE_COLORS: Record<string, string> = {
+  floor_plan: 'bg-green-900/50 text-green-400 border-green-700',
+  elevation: 'bg-blue-900/50 text-blue-400 border-blue-700',
+  foundation: 'bg-orange-900/50 text-orange-400 border-orange-700',
+  section: 'bg-purple-900/50 text-purple-400 border-purple-700',
+  schedule: 'bg-cyan-900/50 text-cyan-400 border-cyan-700',
+  roof: 'bg-yellow-900/50 text-yellow-400 border-yellow-700',
+  detail: 'bg-zinc-800 text-zinc-400 border-zinc-700',
+  site: 'bg-zinc-800 text-zinc-400 border-zinc-700',
+  title: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+  electrical: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+  plumbing: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+  other: 'bg-zinc-800 text-zinc-500 border-zinc-700',
+};
+
+export function PageSelector({
+  pdfUrl,
+  totalPages,
+  pageScores,
+  isClassifying,
+  classificationDone,
+  onConfirm,
+  onPdfLoaded,
+}: PageSelectorProps) {
+  // Local selection state (synced to store only on confirm)
   const [localSelectedPages, setLocalSelectedPages] = useState<number[]>([]);
   const [previewIdx, setPreviewIdx] = useState(0);
   const [zoom, setZoom] = useState(1.0);
@@ -25,16 +51,29 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
   const [pageCount, setPageCount] = useState(totalPages);
   const containerRef = useRef<HTMLDivElement>(null);
   const pdfLoadedRef = useRef(false);
+  const autoSelectedRef = useRef(false);
+
+  const setPageScoresStore = useTakeoffStore((s) => s.setPageScores);
 
   const effectivePageCount = pageCount || totalPages;
   const pageIndices = Array.from({ length: effectivePageCount }, (_, i) => i);
   const isSelected = (idx: number) => localSelectedPages.includes(idx);
 
-  // Sync store on confirm (not on every toggle)
-  const setPageScores = useTakeoffStore((s) => s.setPageScores);
-  const confirmPageSelection = useTakeoffStore((s) => s.confirmPageSelection);
+  // Auto-select AI-recommended pages when classification completes
+  useEffect(() => {
+    if (classificationDone && !autoSelectedRef.current && pageScores.length > 0) {
+      autoSelectedRef.current = true;
+      const aiPicked = pageScores
+        .filter((s) => s.ai_selected)
+        .map((s) => s.page_index);
+      if (aiPicked.length > 0) {
+        setLocalSelectedPages(aiPicked);
+        setPreviewIdx(aiPicked[0]);
+      }
+    }
+  }, [classificationDone, pageScores]);
 
-  // Measure preview container
+  // Measure container
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -58,16 +97,19 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
   }, []);
 
   const handleConfirm = useCallback(() => {
-    // Push selection into store only at confirm time
-    const scores = pageIndices.map((i) => ({
-      page_index: i,
-      score: 0.5,
-      label: `Page ${i + 1}`,
-      ai_selected: localSelectedPages.includes(i),
-    }));
-    setPageScores(scores);
+    // Push page scores (with selections) into the store before confirming
+    const scores = pageIndices.map((i) => {
+      const cls = pageScores.find((s) => s.page_index === i);
+      return {
+        page_index: i,
+        score: cls?.score ?? 0.5,
+        label: cls?.label ?? `Page ${i + 1}`,
+        ai_selected: localSelectedPages.includes(i),
+      };
+    });
+    setPageScoresStore(scores);
     onConfirm();
-  }, [pageIndices, localSelectedPages, setPageScores, onConfirm]);
+  }, [pageIndices, pageScores, localSelectedPages, setPageScoresStore, onConfirm]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -85,15 +127,37 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
     }
   }, [onPdfLoaded]);
 
+  // Current page classification info
+  const currentPageScore = pageScores.find((s) => s.page_index === previewIdx);
+  const currentLabel = currentPageScore?.label ?? `Page ${previewIdx + 1}`;
+
   return (
     <div className="flex flex-col h-full bg-zinc-950 text-zinc-100">
       <div className="flex flex-1 overflow-hidden">
         {/* Filmstrip */}
-        <div className="w-28 flex-shrink-0 border-r border-zinc-800 overflow-y-auto bg-zinc-900/50 flex flex-col gap-2 py-3 px-2">
-          <div className="text-[9px] text-zinc-500 uppercase tracking-widest px-1 mb-1">Pages</div>
+        <div className="w-36 flex-shrink-0 border-r border-zinc-800 overflow-y-auto bg-zinc-900/50 flex flex-col gap-2 py-3 px-2">
+          {isClassifying && (
+            <div className="flex items-center gap-1.5 px-1 mb-2 text-[10px] text-amber-400">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Analyzing pages…
+            </div>
+          )}
+          {!isClassifying && classificationDone && (
+            <div className="flex items-center gap-1.5 px-1 mb-2 text-[10px] text-green-400">
+              <Sparkles className="w-3 h-3" />
+              AI classified {pageScores.length} pages
+            </div>
+          )}
+          {!classificationDone && !isClassifying && (
+            <div className="text-[9px] text-zinc-500 uppercase tracking-widest px-1 mb-1">Pages</div>
+          )}
+
           {pageIndices.map((idx) => {
             const selected = isSelected(idx);
             const previewing = previewIdx === idx;
+            const score = pageScores.find((s) => s.page_index === idx);
+            const isFloorPlan = score?.ai_selected ?? false;
+            const pageName = score?.label ?? `Page ${idx + 1}`;
 
             return (
               <button
@@ -108,13 +172,14 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
                   <Document file={pdfUrl} loading={null} error={null}>
                     <Page
                       pageNumber={idx + 1}
-                      width={80}
+                      width={115}
                       renderTextLayer={false}
                       renderAnnotationLayer={false}
                     />
                   </Document>
                 </div>
 
+                {/* Selected checkmark */}
                 {selected && (
                   <>
                     <div className="absolute inset-0 border-2 border-green-500 rounded pointer-events-none" />
@@ -124,8 +189,18 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
                   </>
                 )}
 
-                <div className="absolute bottom-0 left-0 right-0 bg-zinc-950/80 text-center text-zinc-400 text-[10px] py-0.5">
-                  {idx + 1}
+                {/* AI floor plan badge */}
+                {isFloorPlan && !selected && (
+                  <div className="absolute top-1 right-1 w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center shadow">
+                    <Sparkles className="w-3 h-3 text-white" />
+                  </div>
+                )}
+
+                {/* Page name label */}
+                <div className="absolute bottom-0 left-0 right-0 bg-zinc-950/90 text-center text-[9px] py-0.5 px-0.5 truncate">
+                  <span className={isFloorPlan ? 'text-green-400' : 'text-zinc-500'}>
+                    {pageName}
+                  </span>
                 </div>
               </button>
             );
@@ -136,9 +211,15 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
-            <span className="text-sm text-zinc-300 font-medium">
-              Page {previewIdx + 1} of {effectivePageCount}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-zinc-300 font-medium">{currentLabel}</span>
+              {currentPageScore?.ai_selected && (
+                <span className="flex items-center gap-1 text-[10px] text-green-400 bg-green-950 border border-green-800 rounded px-1.5 py-0.5">
+                  <Sparkles className="w-2.5 h-2.5" />
+                  Floor Plan
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center gap-2">
               {/* Zoom */}
@@ -227,8 +308,13 @@ export function PageSelector({ pdfUrl, totalPages, onConfirm, onPdfLoaded }: Pag
       <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-900 px-6 py-3 flex items-center justify-between">
         <span className="text-sm text-zinc-400">
           {localSelectedPages.length === 0
-            ? 'No pages selected — click "Include this page" on pages you need'
-            : `${localSelectedPages.length} page${localSelectedPages.length !== 1 ? 's' : ''} selected: ${localSelectedPages.map((p) => p + 1).join(', ')}`}
+            ? isClassifying
+              ? 'AI is analyzing your pages — floor plans will be auto-selected…'
+              : 'No pages selected — click "Include this page" on pages you need'
+            : `${localSelectedPages.length} page${localSelectedPages.length !== 1 ? 's' : ''} selected: ${localSelectedPages.map((p) => {
+                const name = pageScores.find((s) => s.page_index === p)?.label;
+                return name ?? `Page ${p + 1}`;
+              }).join(', ')}`}
         </span>
 
         <button

@@ -2,14 +2,23 @@
 
 import { use, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
 import { supabase } from '@/lib/supabase/client';
 import { useTakeoffStore } from '@/lib/stores/takeoff-store';
 import { PageSelector } from '@/components/takeoff/PageSelector';
 import { BlueprintWorkspace } from '@/components/takeoff/BlueprintWorkspace';
 import type { VisionRegionSuggestion, TakeoffRegion, PageScore } from '@/lib/types/takeoff';
-// pdfjs is loaded dynamically in triggerVisionAnalysis to avoid SSR issues
+
+// Classification result from the API
+interface PageClassification {
+  page_index: number;
+  page_type: string;
+  page_name: string;
+  has_dimensions: boolean;
+  is_floor_plan: boolean;
+  confidence: number;
+}
 
 export default function TakeoffPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
@@ -21,18 +30,22 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   const [totalPages, setTotalPages] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
+  // ── AI classification state ─────────────────────────────────────────────────
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [classificationDone, setClassificationDone] = useState(false);
+  const [classifications, setClassifications] = useState<PageClassification[]>([]);
+  const classifyStartedRef = useRef(false);
+
   // ── Store ───────────────────────────────────────────────────────────────────
   const currentStep = useTakeoffStore((s) => s.currentStep);
-  const selectedPages = useTakeoffStore((s) => s.selectedPages);
   const session = useTakeoffStore((s) => s.session);
-  const setPageScores = useTakeoffStore((s) => s.setPageScores);
   const setSession = useTakeoffStore((s) => s.setSession);
   const confirmPageSelection = useTakeoffStore((s) => s.confirmPageSelection);
   const addRegion = useTakeoffStore((s) => s.addRegion);
   const setVisionLoading = useTakeoffStore((s) => s.setVisionLoading);
   const setVisionResults = useTakeoffStore((s) => s.setVisionResults);
 
-  // ── Load document on mount ───────────────────────────────────────────────────
+  // ── Load document on mount ─────────────────────────────────────────────────
   useEffect(() => {
     async function loadDocument() {
       try {
@@ -53,41 +66,88 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         setIsLoading(false);
       }
     }
-
     loadDocument();
   }, [projectId]);
 
-  // ── Initialize page scores ONCE when totalPages is first known ───────────────
-  const scoresInitializedRef = useRef(false);
-  useEffect(() => {
-    if (totalPages > 0 && !scoresInitializedRef.current) {
-      scoresInitializedRef.current = true;
-      const scores: PageScore[] = Array.from({ length: totalPages }, (_, i) => ({
-        page_index: i,
-        score: 0.5,
-        label: `Page ${i + 1}`,
-        ai_selected: false,
-      }));
-      setPageScores(scores);
-    }
-  }, [totalPages, setPageScores]);
+  // ── Classify pages with Vision AI once PDF page count is known ─────────────
+  const classifyPages = useCallback(async (url: string, numPages: number) => {
+    if (classifyStartedRef.current) return;
+    classifyStartedRef.current = true;
+    setIsClassifying(true);
 
-  // ── Vision analysis ──────────────────────────────────────────────────────────
+    try {
+      const pdfjs = await import('pdfjs-dist');
+      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+      const loadingTask = pdfjs.getDocument(url);
+      const pdf = await loadingTask.promise;
+
+      // Render all pages as low-res thumbnails (scale 0.5 ≈ 400px wide)
+      const pages: Array<{ image_base64: string }> = [];
+      for (let i = 1; i <= numPages; i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 0.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const base64 = canvas.toDataURL('image/jpeg', 0.6).replace(/^data:image\/jpeg;base64,/, '');
+        pages.push({ image_base64: base64 });
+      }
+
+      const response = await fetch('/api/takeoff/classify-pages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pages }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const results: PageClassification[] = data.pages ?? [];
+        setClassifications(results);
+      }
+    } catch (err) {
+      console.error('[TakeoffPage] Page classification failed:', err);
+    } finally {
+      setIsClassifying(false);
+      setClassificationDone(true);
+    }
+  }, []);
+
+  // ── When PDF loads, trigger classification ─────────────────────────────────
+  const handlePdfLoaded = useCallback((numPages: number) => {
+    setTotalPages(numPages);
+    if (pdfUrl && numPages > 0) {
+      classifyPages(pdfUrl, numPages);
+    }
+  }, [pdfUrl, classifyPages]);
+
+  // ── Build PageScore array from classifications ─────────────────────────────
+  const pageScores: PageScore[] = Array.from({ length: totalPages }, (_, i) => {
+    const cls = classifications.find((c) => c.page_index === i);
+    return {
+      page_index: i,
+      score: cls?.confidence ?? 0.5,
+      label: cls?.page_name ?? `Page ${i + 1}`,
+      ai_selected: cls?.is_floor_plan ?? false,
+    };
+  });
+
+  // ── Vision analysis for wall regions (Step 2) ──────────────────────────────
   const triggerVisionAnalysis = useCallback(
     async (pageIndex: number) => {
       if (!pdfUrl || !session) return;
-
       setVisionLoading(pageIndex, true);
 
       try {
-        // Dynamically import pdfjs to avoid SSR issues
         const pdfjs = await import('pdfjs-dist');
         pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-        // Render the PDF page to a canvas and convert to base64
         const loadingTask = pdfjs.getDocument(pdfUrl);
         const pdf = await loadingTask.promise;
-        const page = await pdf.getPage(pageIndex + 1); // pdfjs pages are 1-indexed
+        const page = await pdf.getPage(pageIndex + 1);
 
         const viewport = page.getViewport({ scale: 1.5 });
         const canvas = document.createElement('canvas');
@@ -101,7 +161,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
         const base64 = canvas.toDataURL('image/jpeg', 0.85).replace(/^data:image\/jpeg;base64,/, '');
 
-        // Call the Vision analysis API
         const response = await fetch('/api/takeoff/analyze-page', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -123,7 +182,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
         setVisionResults(pageIndex, suggestions);
 
-        // Add each suggestion as a TakeoffRegion in the store
         for (const suggestion of suggestions) {
           const region: TakeoffRegion = {
             id: uuid(),
@@ -152,12 +210,11 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     [pdfUrl, session, addRegion, setVisionLoading, setVisionResults]
   );
 
-  // ── Page selection confirmed ─────────────────────────────────────────────────
+  // ── Page selection confirmed ───────────────────────────────────────────────
   const handleConfirmPageSelection = useCallback(async () => {
     const currentSelectedPages = useTakeoffStore.getState().selectedPages;
     if (!documentId || currentSelectedPages.length === 0) return;
 
-    // Try to persist to Supabase, but don't block the flow if it fails
     let sessionId = uuid();
     try {
       const { data: sessionData } = await supabase
@@ -178,7 +235,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       console.warn('[TakeoffPage] DB insert failed, using local session:', err);
     }
 
-    // Always create a session in the store and advance
     setSession({
       id: sessionId,
       project_id: projectId,
@@ -192,20 +248,17 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
     confirmPageSelection();
 
-    // Trigger vision analysis on the first selected page
-    const firstPage = currentSelectedPages[0];
-    if (firstPage != null) {
-      setTimeout(() => {
-        triggerVisionAnalysis(firstPage);
-      }, 0);
+    // Trigger vision analysis on all selected pages
+    for (const pageIdx of currentSelectedPages) {
+      triggerVisionAnalysis(pageIdx);
     }
   }, [documentId, projectId, setSession, confirmPageSelection, triggerVisionAnalysis]);
 
-  // ── Step label for header ────────────────────────────────────────────────────
+  // ── Step label ─────────────────────────────────────────────────────────────
   const stepLabel =
     currentStep === 'page-selection' ? 'Step 1: Select Pages' : 'Step 2: Review Regions';
 
-  // ── Loading state ────────────────────────────────────────────────────────────
+  // ── Loading state ──────────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="h-screen bg-zinc-950 flex items-center justify-center">
@@ -224,7 +277,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className="h-screen flex flex-col bg-zinc-950">
-      {/* ── Minimal header ──────────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="shrink-0 px-4 py-2.5 border-b border-zinc-800 flex items-center gap-3">
         <button
           onClick={() => router.push(`/projects/${projectId}`)}
@@ -243,15 +296,25 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         <span className="text-xs text-blue-400 bg-blue-950 border border-blue-800 rounded px-2 py-0.5">
           {stepLabel}
         </span>
+
+        {isClassifying && (
+          <span className="flex items-center gap-1.5 text-xs text-amber-400 ml-auto">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            AI analyzing pages…
+          </span>
+        )}
       </div>
 
-      {/* ── Main content ────────────────────────────────────────────────────── */}
+      {/* Content */}
       <div className="flex-1 min-h-0">
         {currentStep === 'page-selection' && (
           <PageSelector
             pdfUrl={pdfUrl}
             totalPages={totalPages}
-            onPdfLoaded={(numPages) => setTotalPages(numPages)}
+            pageScores={pageScores}
+            isClassifying={isClassifying}
+            classificationDone={classificationDone}
+            onPdfLoaded={handlePdfLoaded}
             onConfirm={handleConfirmPageSelection}
           />
         )}
