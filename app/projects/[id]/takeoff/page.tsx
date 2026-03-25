@@ -154,10 +154,11 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
   // ── Page selection confirmed ─────────────────────────────────────────────────
   const handleConfirmPageSelection = useCallback(async () => {
-    // Read fresh from store (PageSelector.handleConfirm syncs just before calling this)
     const currentSelectedPages = useTakeoffStore.getState().selectedPages;
     if (!documentId || currentSelectedPages.length === 0) return;
 
+    // Try to persist to Supabase, but don't block the flow if it fails
+    let sessionId = uuid();
     try {
       const { data: sessionData } = await supabase
         .from('takeoff_sessions')
@@ -171,32 +172,34 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         .single();
 
       if (sessionData) {
-        setSession({
-          id: sessionData.id,
-          project_id: sessionData.project_id,
-          document_id: sessionData.document_id,
-          status: sessionData.status,
-          selected_pages: sessionData.selected_pages,
-          regions: [],
-          created_at: sessionData.created_at,
-          updated_at: sessionData.updated_at,
-        });
-      }
-
-      confirmPageSelection();
-
-      // Trigger vision analysis on the first selected page after store transition
-      const firstPage = selectedPages[0];
-      if (firstPage != null) {
-        // Use a short delay to allow the session state to propagate before analysis
-        setTimeout(() => {
-          triggerVisionAnalysis(firstPage);
-        }, 0);
+        sessionId = sessionData.id;
       }
     } catch (err) {
-      console.error('[TakeoffPage] Failed to create takeoff session:', err);
+      console.warn('[TakeoffPage] DB insert failed, using local session:', err);
     }
-  }, [documentId, selectedPages, projectId, setSession, confirmPageSelection, triggerVisionAnalysis]);
+
+    // Always create a session in the store and advance
+    setSession({
+      id: sessionId,
+      project_id: projectId,
+      document_id: documentId,
+      status: 'in_progress',
+      selected_pages: currentSelectedPages,
+      regions: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    confirmPageSelection();
+
+    // Trigger vision analysis on the first selected page
+    const firstPage = currentSelectedPages[0];
+    if (firstPage != null) {
+      setTimeout(() => {
+        triggerVisionAnalysis(firstPage);
+      }, 0);
+    }
+  }, [documentId, projectId, setSession, confirmPageSelection, triggerVisionAnalysis]);
 
   // ── Step label for header ────────────────────────────────────────────────────
   const stepLabel =
