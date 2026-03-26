@@ -341,7 +341,84 @@ pdfengine/
 
 ---
 
-## 11. Open Questions
+## 11. Extraction Architecture — Source-Priority Pipeline
+
+### Validated Finding (March 26, 2026)
+
+Analysis of our actual plan corpus reveals the extraction landscape:
+
+| Plans | Vector Geometry? | Embedded Text? | OCR Required? |
+|-------|-----------------|----------------|---------------|
+| Gamache, Haas, Eddie, Kinloch (4/6) | Yes — 15K-21K drawing paths | **No** — text drawn as line strokes | **Yes** — only way to read dimensions |
+| Chang, Onica (2/6) | Yes | **Yes** — 1,300+ extractable words | Optional — text extractable directly |
+
+**Key insight:** Most residential blueprint PDFs have text outlined as vector strokes (common when AutoCAD exports without the original architectural fonts). This means OCR is not a fallback — it is the primary extraction path for the majority of real-world plans.
+
+### Corrected Extraction Hierarchy
+
+The theoretically optimal hierarchy (BIM → vector text → OCR) doesn't match our reality. Our corrected hierarchy based on actual data:
+
+```
+1. User-guided region selection         ← always (our core UX)
+2. OCR on the cropped region            ← primary for ~70% of plans
+3. Embedded text extraction (when available) ← enhancement for ~30% of plans
+4. Vector geometry measurement          ← future R&D upgrade
+5. User confirmation                    ← always (the trust gate)
+```
+
+### Phased Roadmap
+
+**v1 — Ship Now (Current Sprint)**
+- User draws regions → OCR reads crop → user confirms → quote
+- This is the right architecture and should ship first
+- Already better than full-page OCR (±35% accuracy → user-confirmed accuracy)
+
+**v1.1 — Quick Win (Next Sprint)**
+- Add `page.get_text("words")` pre-check in `region_adapter.py`
+- For plans with embedded text (Chang, Onica), extract dimensions directly before OCR
+- Free accuracy boost on ~30% of plans, ~2-3 days of work
+- No UX changes needed — transparent to the user
+
+**v2 — Vector Geometry R&D (Month+)**
+- Explore `page.get_drawings()` for direct wall measurement
+- 63,000 line segments on Gamache floor plan — wall geometry is in there
+- Challenges: separating walls from fixtures, hatching, furniture, text strokes
+- Requires geometric filtering (line width, connectivity, length) or ML classification
+- Potential to eliminate OCR for measurement entirely on vector PDFs
+- **This is the real competitive advantage** — no competitor does vector-geometry-aware AI takeoff on residential plans
+
+**v3 — Advanced Capabilities (Quarter+)**
+- Scale calibration from known dimensions (enables geometric measurement)
+- Non-wall region modes (attic area, crawlspace, ceiling SF, count/symbol)
+- Template learning (similar house layouts get pre-populated regions)
+- Full vector wall detection and perimeter inference
+
+### What the Market Does
+
+| Tool | Approach | Accuracy Model |
+|------|----------|---------------|
+| Autodesk Takeoff | Calibrated digital measurement + manual | Human-dependent |
+| Bluebeam Revu | Scale calibration + linear/area tools | Human-dependent |
+| ConstructConnect | AI as "head start" + human review | AI-assisted |
+| Togal.AI | AI detect/measure/count + validation | AI-assisted |
+| **EV Insulation (v1)** | **User draws + OCR reads + user confirms** | **AI-assisted, user-guided** |
+| **EV Insulation (v2 target)** | **Source-priority: text → OCR → geometry** | **Source-aware AI** |
+
+**Market signal:** AI speeds takeoff, but trusted accuracy still comes from calibrated geometry and estimator review. Our user-guided approach aligns with this reality.
+
+### Architectural Principle
+
+**"OCR-primary, source-aware extraction."**
+
+Each region analyzer should try, in order:
+1. Check for extractable text (`page.get_text("words")`)
+2. If not, use OCR (PaddleOCR on cropped image)
+3. Optionally inspect vector drawings for measurement candidates
+4. Always keep user confirmation as the final gate
+
+---
+
+## 12. Open Questions
 
 1. **Should we persist regions to Supabase on every confirm, or batch at the end?** Currently batch — regions are only in Zustand until "Generate Quote".
 
