@@ -196,7 +196,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   // ── Loading state ──────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="h-screen bg-white flex items-center justify-center">
+      <div className="h-full bg-white flex items-center justify-center">
         <div className="h-6 w-6 rounded-full border-2 border-zinc-300 border-t-blue-500 animate-spin" />
       </div>
     );
@@ -204,14 +204,14 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
   if (!pdfUrl) {
     return (
-      <div className="h-screen bg-white flex items-center justify-center">
+      <div className="h-full bg-white flex items-center justify-center">
         <p className="text-zinc-500 text-sm">No document found for this project.</p>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col bg-white">
+    <div className="h-full flex flex-col bg-white">
       {/* Header */}
       <div className="shrink-0 px-4 py-2.5 border-b border-zinc-200 flex items-center gap-3">
         <button
