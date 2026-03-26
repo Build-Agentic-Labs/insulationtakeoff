@@ -18,22 +18,6 @@ interface PageSelectorProps {
   onPdfLoaded?: (numPages: number) => void;
 }
 
-// Page type badge colors
-const PAGE_TYPE_COLORS: Record<string, string> = {
-  floor_plan: 'bg-green-900/50 text-green-400 border-green-700',
-  elevation: 'bg-blue-900/50 text-blue-400 border-blue-700',
-  foundation: 'bg-orange-900/50 text-orange-400 border-orange-700',
-  section: 'bg-purple-900/50 text-purple-400 border-purple-700',
-  schedule: 'bg-cyan-900/50 text-cyan-400 border-cyan-700',
-  roof: 'bg-yellow-900/50 text-yellow-400 border-yellow-700',
-  detail: 'bg-zinc-800 text-zinc-400 border-zinc-700',
-  site: 'bg-zinc-800 text-zinc-400 border-zinc-700',
-  title: 'bg-zinc-800 text-zinc-500 border-zinc-700',
-  electrical: 'bg-zinc-800 text-zinc-500 border-zinc-700',
-  plumbing: 'bg-zinc-800 text-zinc-500 border-zinc-700',
-  other: 'bg-zinc-800 text-zinc-500 border-zinc-700',
-};
-
 export function PageSelector({
   pdfUrl,
   totalPages,
@@ -43,7 +27,6 @@ export function PageSelector({
   onConfirm,
   onPdfLoaded,
 }: PageSelectorProps) {
-  // Local selection state (synced to store only on confirm)
   const [localSelectedPages, setLocalSelectedPages] = useState<number[]>([]);
   const [previewIdx, setPreviewIdx] = useState(0);
   const [zoom, setZoom] = useState(1.0);
@@ -97,7 +80,6 @@ export function PageSelector({
   }, []);
 
   const handleConfirm = useCallback(() => {
-    // Push page scores (with selections) into the store before confirming
     const scores = pageIndices.map((i) => {
       const cls = pageScores.find((s) => s.page_index === i);
       return {
@@ -111,12 +93,20 @@ export function PageSelector({
     onConfirm();
   }, [pageIndices, pageScores, localSelectedPages, setPageScoresStore, onConfirm]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      setZoom((z) => Math.min(3, Math.max(0.2, z + delta)));
-    }
+  // Use native event listener for wheel zoom (React onWheel is passive, can't preventDefault)
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = previewContainerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        setZoom((z) => Math.min(3, Math.max(0.2, z + delta)));
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
   }, []);
 
   const handlePdfLoaded = useCallback((numPages: number) => {
@@ -127,29 +117,28 @@ export function PageSelector({
     }
   }, [onPdfLoaded]);
 
-  // Current page classification info
   const currentPageScore = pageScores.find((s) => s.page_index === previewIdx);
   const currentLabel = currentPageScore?.label ?? `Page ${previewIdx + 1}`;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100">
+    <div className="flex flex-col h-full bg-white text-zinc-900">
       <div className="flex flex-1 overflow-hidden">
         {/* Filmstrip */}
-        <div className="w-36 flex-shrink-0 border-r border-zinc-800 overflow-y-auto bg-zinc-900/50 flex flex-col gap-2 py-3 px-2">
+        <div className="w-36 flex-shrink-0 border-r border-zinc-200 overflow-y-auto bg-zinc-50 flex flex-col gap-2 py-3 px-2">
           {isClassifying && (
-            <div className="flex items-center gap-1.5 px-1 mb-2 text-[10px] text-amber-400">
+            <div className="flex items-center gap-1.5 px-1 mb-2 text-[10px] text-amber-600">
               <Loader2 className="w-3 h-3 animate-spin" />
               Analyzing pages…
             </div>
           )}
           {!isClassifying && classificationDone && (
-            <div className="flex items-center gap-1.5 px-1 mb-2 text-[10px] text-green-400">
+            <div className="flex items-center gap-1.5 px-1 mb-2 text-[10px] text-green-600">
               <Sparkles className="w-3 h-3" />
               AI classified {pageScores.length} pages
             </div>
           )}
           {!classificationDone && !isClassifying && (
-            <div className="text-[9px] text-zinc-500 uppercase tracking-widest px-1 mb-1">Pages</div>
+            <div className="text-[9px] text-zinc-400 uppercase tracking-widest px-1 mb-1">Pages</div>
           )}
 
           {pageIndices.map((idx) => {
@@ -164,11 +153,11 @@ export function PageSelector({
                 key={idx}
                 onClick={() => setPreviewIdx(idx)}
                 className={[
-                  'relative rounded overflow-hidden flex-shrink-0 focus:outline-none transition-all',
-                  previewing ? 'ring-2 ring-blue-500' : 'ring-1 ring-zinc-700 hover:ring-zinc-500',
+                  'relative rounded-lg overflow-hidden flex-shrink-0 focus:outline-none transition-all',
+                  previewing ? 'ring-2 ring-blue-500 shadow-md' : 'ring-1 ring-zinc-200 hover:ring-zinc-400 shadow-sm',
                 ].join(' ')}
               >
-                <div className="bg-zinc-800">
+                <div className="bg-white">
                   <Document file={pdfUrl} loading={null} error={null}>
                     <Page
                       pageNumber={idx + 1}
@@ -179,26 +168,23 @@ export function PageSelector({
                   </Document>
                 </div>
 
-                {/* Selected checkmark */}
                 {selected && (
                   <>
-                    <div className="absolute inset-0 border-2 border-green-500 rounded pointer-events-none" />
+                    <div className="absolute inset-0 border-2 border-green-500 rounded-lg pointer-events-none" />
                     <div className="absolute top-1 right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center shadow">
                       <Check className="w-3 h-3 text-white" strokeWidth={3} />
                     </div>
                   </>
                 )}
 
-                {/* AI floor plan badge */}
                 {isFloorPlan && !selected && (
-                  <div className="absolute top-1 right-1 w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center shadow">
+                  <div className="absolute top-1 right-1 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shadow">
                     <Sparkles className="w-3 h-3 text-white" />
                   </div>
                 )}
 
-                {/* Page name label */}
-                <div className="absolute bottom-0 left-0 right-0 bg-zinc-950/90 text-center text-[9px] py-0.5 px-0.5 truncate">
-                  <span className={isFloorPlan ? 'text-green-400' : 'text-zinc-500'}>
+                <div className="absolute bottom-0 left-0 right-0 bg-white/90 text-center text-[9px] py-0.5 px-0.5 truncate border-t border-zinc-100">
+                  <span className={isFloorPlan ? 'text-green-700 font-medium' : 'text-zinc-500'}>
                     {pageName}
                   </span>
                 </div>
@@ -210,11 +196,11 @@ export function PageSelector({
         {/* Preview */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-200 bg-white flex-shrink-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-zinc-300 font-medium">{currentLabel}</span>
+              <span className="text-sm text-zinc-800 font-medium">{currentLabel}</span>
               {currentPageScore?.ai_selected && (
-                <span className="flex items-center gap-1 text-[10px] text-green-400 bg-green-950 border border-green-800 rounded px-1.5 py-0.5">
+                <span className="flex items-center gap-1 text-[10px] text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
                   <Sparkles className="w-2.5 h-2.5" />
                   Floor Plan
                 </span>
@@ -222,11 +208,10 @@ export function PageSelector({
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Zoom */}
               <div className="flex items-center gap-1 mr-3">
                 <button
                   onClick={() => setZoom((z) => Math.max(0.2, z - 0.15))}
-                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-100 border border-zinc-200 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200 transition-colors"
                   title="Zoom out"
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
@@ -234,28 +219,27 @@ export function PageSelector({
                 <span className="text-xs text-zinc-500 w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
                 <button
                   onClick={() => setZoom((z) => Math.min(3, z + 0.15))}
-                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-100 border border-zinc-200 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200 transition-colors"
                   title="Zoom in"
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setZoom(1.0)}
-                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+                  className="w-7 h-7 flex items-center justify-center rounded bg-zinc-100 border border-zinc-200 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200 transition-colors"
                   title="Fit to view"
                 >
                   <Maximize className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* Include toggle */}
               <button
                 onClick={() => togglePage(previewIdx)}
                 className={[
-                  'px-4 py-1.5 text-sm rounded font-medium transition-colors',
+                  'px-4 py-1.5 text-sm rounded-lg font-medium transition-colors shadow-sm',
                   isSelected(previewIdx)
-                    ? 'bg-green-600 text-white hover:bg-green-500'
-                    : 'bg-blue-600 text-white hover:bg-blue-500',
+                    ? 'bg-green-500 text-white hover:bg-green-600'
+                    : 'bg-blue-600 text-white hover:bg-blue-700',
                 ].join(' ')}
               >
                 {isSelected(previewIdx) ? (
@@ -272,9 +256,12 @@ export function PageSelector({
 
           {/* PDF preview */}
           <div
-            ref={containerRef}
-            className="flex-1 overflow-auto bg-zinc-950"
-            onWheel={handleWheel}
+            ref={(el) => {
+              // Assign both refs to the same element
+              (containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+              (previewContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+            }}
+            className="flex-1 overflow-auto bg-zinc-100"
           >
             <div
               className="flex justify-center p-4"
@@ -288,15 +275,15 @@ export function PageSelector({
               <Document
                 file={pdfUrl}
                 onLoadSuccess={(pdf) => handlePdfLoaded(pdf.numPages)}
-                loading={<div className="text-zinc-500 text-sm mt-16">Loading PDF…</div>}
-                error={<div className="text-red-400 text-sm mt-16">Failed to load PDF.</div>}
+                loading={<div className="text-zinc-400 text-sm mt-16">Loading PDF…</div>}
+                error={<div className="text-red-500 text-sm mt-16">Failed to load PDF.</div>}
               >
                 <Page
                   pageNumber={previewIdx + 1}
                   width={fitWidth}
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
-                  className="shadow-xl"
+                  className="shadow-xl rounded-lg"
                 />
               </Document>
             </div>
@@ -305,8 +292,8 @@ export function PageSelector({
       </div>
 
       {/* Bottom bar */}
-      <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-900 px-6 py-3 flex items-center justify-between">
-        <span className="text-sm text-zinc-400">
+      <div className="flex-shrink-0 border-t border-zinc-200 bg-white px-6 py-3 flex items-center justify-between">
+        <span className="text-sm text-zinc-500">
           {localSelectedPages.length === 0
             ? isClassifying
               ? 'AI is analyzing your pages — floor plans will be auto-selected…'
@@ -321,10 +308,10 @@ export function PageSelector({
           onClick={handleConfirm}
           disabled={localSelectedPages.length === 0}
           className={[
-            'flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-colors',
+            'flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm transition-colors shadow-sm',
             localSelectedPages.length === 0
-              ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
-              : 'bg-blue-600 text-white hover:bg-blue-500',
+              ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
+              : 'bg-blue-600 text-white hover:bg-blue-700',
           ].join(' ')}
         >
           Continue with {localSelectedPages.length} page{localSelectedPages.length !== 1 ? 's' : ''}
