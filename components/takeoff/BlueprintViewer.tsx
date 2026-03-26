@@ -12,7 +12,7 @@ interface BlueprintViewerProps {
 }
 
 const MIN_SCALE = 0.3;
-const MAX_SCALE = 5.0;
+const MAX_SCALE = 3.0;
 const ZOOM_STEP = 0.15;
 
 export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewerProps) {
@@ -69,27 +69,43 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
       const effectiveScale = fitScale * scale;
       const viewport = page.getViewport({ scale: effectiveScale });
 
-      // Canvas CSS size = viewport, pixel size = viewport * renderDpr
-      // Cap pixel dimensions to browser max (~16384px) to prevent crash
-      const MAX_CANVAS_PX = 16000;
-      const maxPixelDim = Math.max(viewport.width, viewport.height) * dpr;
-      const renderDpr = maxPixelDim > MAX_CANVAS_PX
-        ? (MAX_CANVAS_PX / Math.max(viewport.width, viewport.height))
-        : dpr;
+      // Hard cap: canvas pixel area must stay under 124M pixels (Safari limit ~268M,
+      // Chrome ~16384 per side). We use 1.0 as renderDpr when zoomed — the zoom itself
+      // provides the detail, DPR scaling on top is what causes the crash.
+      const renderDpr = scale > 1.5 ? 1 : Math.min(dpr, 2);
+      const maxSide = 8000;
+      const cssW = Math.min(viewport.width, maxSide);
+      const cssH = Math.min(viewport.height, maxSide);
+      const pixelW = Math.floor(cssW * renderDpr);
+      const pixelH = Math.floor(cssH * renderDpr);
 
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-      canvas.width = Math.floor(viewport.width * renderDpr);
-      canvas.height = Math.floor(viewport.height * renderDpr);
+      // If still too large, bail to a safe render
+      if (pixelW * pixelH > 120_000_000) {
+        console.warn('[BlueprintViewer] Canvas too large, reducing quality');
+        canvas.style.width = `${cssW}px`;
+        canvas.style.height = `${cssH}px`;
+        canvas.width = Math.floor(cssW);
+        canvas.height = Math.floor(cssH);
+      } else {
+        canvas.style.width = `${cssW}px`;
+        canvas.style.height = `${cssH}px`;
+        canvas.width = pixelW;
+        canvas.height = pixelH;
+      }
 
-      setPageDims({ width: viewport.width, height: viewport.height });
+      setPageDims({ width: cssW, height: cssH });
 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      ctx.setTransform(renderDpr, 0, 0, renderDpr, 0, 0);
+      const actualDpr = canvas.width / cssW;
+      ctx.setTransform(actualDpr, 0, 0, actualDpr, 0, 0);
 
-      const renderTask = page.render({ canvasContext: ctx, viewport });
+      // Re-create viewport at the capped CSS size
+      const renderScale = (cssW / baseViewport.width);
+      const renderViewport = page.getViewport({ scale: renderScale });
+
+      const renderTask = page.render({ canvasContext: ctx, viewport: renderViewport });
       renderTaskRef.current = renderTask;
 
       renderTask.promise.then(() => {
