@@ -224,9 +224,26 @@ export function BlueprintWorkspace({
         {/* Region list */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {pageRegions.length === 0 ? (
-            <p className="text-xs text-zinc-600 text-center mt-6">
-              No regions on this page yet.
-            </p>
+            <div className="text-center mt-6 px-2 space-y-3">
+              <div className="w-10 h-10 mx-auto bg-blue-50 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 4h6l2 2h4a1 1 0 011 1v12a1 1 0 01-1 1H3a1 1 0 01-1-1V7a1 1 0 011-1h4l2-2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-zinc-700">
+                Draw wall regions
+              </p>
+              <p className="text-xs text-zinc-500 leading-relaxed">
+                Use the rectangle tool to draw a box around each exterior wall section. AI will measure the dimensions inside each region.
+              </p>
+              <button
+                onClick={() => setTool('rectangle')}
+                className="mt-2 w-full text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg py-2.5 transition-colors shadow-sm"
+              >
+                Start Drawing
+              </button>
+            </div>
           ) : (
             pageRegions.map((region) => (
               <RegionCard
@@ -238,15 +255,17 @@ export function BlueprintWorkspace({
           )}
         </div>
 
-        {/* Draw custom region */}
-        <div className="px-3 py-2 border-t border-zinc-200 shrink-0">
-          <button
-            onClick={() => setTool('rectangle')}
-            className="w-full text-xs font-medium text-zinc-500 hover:text-zinc-700 border border-dashed border-zinc-200 hover:border-zinc-200 rounded-lg py-2 transition-colors"
-          >
-            + Draw custom region
-          </button>
-        </div>
+        {/* Draw more regions */}
+        {pageRegions.length > 0 && (
+          <div className="px-3 py-2 border-t border-zinc-200 shrink-0">
+            <button
+              onClick={() => setTool('rectangle')}
+              className="w-full text-xs font-medium text-blue-600 hover:text-blue-700 border border-dashed border-blue-200 hover:border-blue-300 rounded-lg py-2 transition-colors"
+            >
+              + Draw another region
+            </button>
+          </div>
+        )}
 
         {/* Spacer absorbed by flex-1 above; RunningTotal pinned to bottom */}
         <RunningTotal onGenerateQuote={onGenerateQuote} />

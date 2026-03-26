@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useTakeoffStore } from '@/lib/stores/takeoff-store';
 import { PageSelector } from '@/components/takeoff/PageSelector';
 import { BlueprintWorkspace } from '@/components/takeoff/BlueprintWorkspace';
-import type { VisionRegionSuggestion, TakeoffRegion, PageScore } from '@/lib/types/takeoff';
+import type { PageScore } from '@/lib/types/takeoff';
 
 // Classification result from the API
 interface PageClassification {
@@ -41,9 +41,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   const session = useTakeoffStore((s) => s.session);
   const setSession = useTakeoffStore((s) => s.setSession);
   const confirmPageSelection = useTakeoffStore((s) => s.confirmPageSelection);
-  const addRegion = useTakeoffStore((s) => s.addRegion);
-  const setVisionLoading = useTakeoffStore((s) => s.setVisionLoading);
-  const setVisionResults = useTakeoffStore((s) => s.setVisionResults);
 
   // ── Load document on mount ─────────────────────────────────────────────────
   useEffect(() => {
@@ -135,87 +132,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     };
   });
 
-  // ── Vision analysis for wall regions (Step 2) ──────────────────────────────
-  const triggerVisionAnalysis = useCallback(
-    async (pageIndex: number) => {
-      // Read session fresh from store — the closure may hold a stale null
-      const currentSession = useTakeoffStore.getState().session;
-      if (!pdfUrl || !currentSession) return;
-      setVisionLoading(pageIndex, true);
-
-      try {
-        const pdfjs = await import('pdfjs-dist');
-        pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-
-        const loadingTask = pdfjs.getDocument(pdfUrl);
-        const pdf = await loadingTask.promise;
-        const page = await pdf.getPage(pageIndex + 1);
-
-        // Render at highest resolution that stays under Claude's 8000px limit
-        const baseViewport = page.getViewport({ scale: 1.0 });
-        const maxDim = Math.max(baseViewport.width, baseViewport.height);
-        const targetScale = Math.min(3.0, 7500 / maxDim); // cap so max dimension < 8000px
-        const viewport = page.getViewport({ scale: targetScale });
-        const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Could not get canvas context');
-
-        await page.render({ canvasContext: ctx, viewport }).promise;
-
-        const base64 = canvas.toDataURL('image/jpeg', 0.85).replace(/^data:image\/jpeg;base64,/, '');
-
-        const response = await fetch('/api/takeoff/analyze-page', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_base64: base64, page_index: pageIndex }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Vision analysis failed: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        const suggestions: VisionRegionSuggestion[] = (data.regions ?? []).map(
-          (r: VisionRegionSuggestion) => ({
-            label: r.label,
-            wall_type: r.wall_type,
-            bbox: r.bbox,
-          })
-        );
-
-        setVisionResults(pageIndex, suggestions);
-
-        for (const suggestion of suggestions) {
-          const region: TakeoffRegion = {
-            id: uuid(),
-            session_id: currentSession.id,
-            page_index: pageIndex,
-            label: suggestion.label,
-            wall_type: suggestion.wall_type,
-            source: 'ai',
-            status: 'pending',
-            bbox: suggestion.bbox,
-            wall_length_lf: null,
-            wall_height_ft: null,
-            gross_sf: null,
-            net_sf: null,
-            openings: [],
-            analysis_result: null,
-            confirmed_at: null,
-          };
-          addRegion(region);
-        }
-      } catch (err) {
-        console.error('[TakeoffPage] Vision analysis error:', err);
-        setVisionLoading(pageIndex, false);
-      }
-    },
-    [pdfUrl, addRegion, setVisionLoading, setVisionResults]
-  );
-
   // ── Page selection confirmed ───────────────────────────────────────────────
   const handleConfirmPageSelection = useCallback(async () => {
     const currentSelectedPages = useTakeoffStore.getState().selectedPages;
@@ -253,12 +169,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     });
 
     confirmPageSelection();
-
-    // Trigger vision analysis on all selected pages
-    for (const pageIdx of currentSelectedPages) {
-      triggerVisionAnalysis(pageIdx);
-    }
-  }, [documentId, projectId, setSession, confirmPageSelection, triggerVisionAnalysis]);
+  }, [documentId, projectId, setSession, confirmPageSelection]);
 
   // ── Step label ─────────────────────────────────────────────────────────────
   const stepLabel =
