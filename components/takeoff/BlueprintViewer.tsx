@@ -7,13 +7,18 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.vers
 
 interface BlueprintViewerProps {
   pdfUrl: string;
-  pageNumber: number; // 1-indexed
+  pageNumber: number;
   children?: (dims: { width: number; height: number }) => React.ReactNode;
 }
 
-const MIN_SCALE = 0.3;
-const MAX_SCALE = 3.0;
-const ZOOM_STEP = 0.15;
+const MIN_SCALE = 0.5;
+const MAX_SCALE = 2.5;
+const ZOOM_STEP = 0.1;
+
+// Max canvas pixels (width * height). Safari caps at ~268M, Chrome at ~16384 per side.
+// We use a conservative budget that works on all browsers including mobile Safari.
+const MAX_CANVAS_AREA = 16_000_000; // 16M pixels — safe everywhere
+const MAX_CANVAS_SIDE = 8000;
 
 export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -25,9 +30,7 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
   const [pageDims, setPageDims] = useState({ width: 0, height: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
-  const dpr = typeof window !== 'undefined' ? Math.max(window.devicePixelRatio, 2) : 2;
-
-  // Load PDF document
+  // Load PDF
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
@@ -42,7 +45,7 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
     return () => { cancelled = true; };
   }, [pdfUrl]);
 
-  // Render page whenever pdfDoc, pageNumber, or scale changes
+  // Render page
   useEffect(() => {
     if (!pdfDoc) return;
     const canvas = canvasRef.current;
@@ -51,7 +54,6 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
 
     let cancelled = false;
 
-    // Cancel previous render
     if (renderTaskRef.current) {
       renderTaskRef.current.cancel();
       renderTaskRef.current = null;
@@ -60,52 +62,53 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
     pdfDoc.getPage(pageNumber).then((page) => {
       if (cancelled) return;
 
-      const baseViewport = page.getViewport({ scale: 1.0 });
+      const baseVp = page.getViewport({ scale: 1.0 });
 
-      // Fit page to container width at scale=1.0
-      const containerWidth = container.clientWidth - 48;
-      const fitScale = Math.max(0.1, containerWidth / baseViewport.width);
+      // CSS dimensions: fit to container at scale=1, then apply zoom
+      const containerWidth = Math.max(container.clientWidth - 48, 400);
+      const fitScale = containerWidth / baseVp.width;
+      const cssWidth = Math.round(baseVp.width * fitScale * scale);
+      const cssHeight = Math.round(baseVp.height * fitScale * scale);
 
-      const effectiveScale = fitScale * scale;
-      const viewport = page.getViewport({ scale: effectiveScale });
+      // Canvas pixel dimensions: start at 2x CSS (retina), then clamp
+      let pixelWidth = cssWidth * 2;
+      let pixelHeight = cssHeight * 2;
 
-      // Hard cap: canvas pixel area must stay under 124M pixels (Safari limit ~268M,
-      // Chrome ~16384 per side). We use 1.0 as renderDpr when zoomed — the zoom itself
-      // provides the detail, DPR scaling on top is what causes the crash.
-      const renderDpr = scale > 1.5 ? 1 : Math.min(dpr, 2);
-      const maxSide = 8000;
-      const cssW = Math.min(viewport.width, maxSide);
-      const cssH = Math.min(viewport.height, maxSide);
-      const pixelW = Math.floor(cssW * renderDpr);
-      const pixelH = Math.floor(cssH * renderDpr);
-
-      // If still too large, bail to a safe render
-      if (pixelW * pixelH > 120_000_000) {
-        console.warn('[BlueprintViewer] Canvas too large, reducing quality');
-        canvas.style.width = `${cssW}px`;
-        canvas.style.height = `${cssH}px`;
-        canvas.width = Math.floor(cssW);
-        canvas.height = Math.floor(cssH);
-      } else {
-        canvas.style.width = `${cssW}px`;
-        canvas.style.height = `${cssH}px`;
-        canvas.width = pixelW;
-        canvas.height = pixelH;
+      // Clamp per-side
+      if (pixelWidth > MAX_CANVAS_SIDE) {
+        const ratio = MAX_CANVAS_SIDE / pixelWidth;
+        pixelWidth = MAX_CANVAS_SIDE;
+        pixelHeight = Math.round(pixelHeight * ratio);
+      }
+      if (pixelHeight > MAX_CANVAS_SIDE) {
+        const ratio = MAX_CANVAS_SIDE / pixelHeight;
+        pixelHeight = MAX_CANVAS_SIDE;
+        pixelWidth = Math.round(pixelWidth * ratio);
       }
 
-      setPageDims({ width: cssW, height: cssH });
+      // Clamp total area
+      const area = pixelWidth * pixelHeight;
+      if (area > MAX_CANVAS_AREA) {
+        const shrink = Math.sqrt(MAX_CANVAS_AREA / area);
+        pixelWidth = Math.floor(pixelWidth * shrink);
+        pixelHeight = Math.floor(pixelHeight * shrink);
+      }
+
+      // Set canvas sizes
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+
+      setPageDims({ width: cssWidth, height: cssHeight });
 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const actualDpr = canvas.width / cssW;
-      ctx.setTransform(actualDpr, 0, 0, actualDpr, 0, 0);
+      // Render: pdfjs viewport matches the pixel dimensions exactly
+      const renderVp = page.getViewport({ scale: pixelWidth / baseVp.width });
 
-      // Re-create viewport at the capped CSS size
-      const renderScale = (cssW / baseViewport.width);
-      const renderViewport = page.getViewport({ scale: renderScale });
-
-      const renderTask = page.render({ canvasContext: ctx, viewport: renderViewport });
+      const renderTask = page.render({ canvasContext: ctx, viewport: renderVp });
       renderTaskRef.current = renderTask;
 
       renderTask.promise.then(() => {
@@ -114,22 +117,21 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
           renderTaskRef.current = null;
         }
       }).catch((err: unknown) => {
-        // Ignore cancellation errors
         if (err instanceof Error && err.message.includes('Rendering cancelled')) return;
         if (!cancelled) console.error('[BlueprintViewer] Render error:', err);
       });
     });
 
     return () => { cancelled = true; };
-  }, [pdfDoc, pageNumber, scale, dpr]);
+  }, [pdfDoc, pageNumber, scale]);
 
-  // Reset scale when page changes
+  // Reset on page change
   useEffect(() => {
     setScale(1.0);
     setIsLoading(true);
   }, [pageNumber]);
 
-  // Wheel zoom (native listener to allow preventDefault)
+  // Ctrl+wheel zoom
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -139,7 +141,10 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
         e.preventDefault();
         e.stopPropagation();
         const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-        setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round((s + delta) * 100) / 100)));
+        setScale((s) => {
+          const next = Math.round((s + delta) * 100) / 100;
+          return Math.min(MAX_SCALE, Math.max(MIN_SCALE, next));
+        });
       }
     };
 
@@ -162,7 +167,6 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
       ref={containerRef}
       className="relative flex-1 overflow-auto bg-zinc-100"
     >
-      {/* Loading overlay */}
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-zinc-100 z-10">
           <div className="flex flex-col items-center gap-2">
@@ -172,12 +176,10 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
         </div>
       )}
 
-      {/* Canvas + overlay */}
       <div className="flex justify-center p-6 min-h-full">
         <div className="relative inline-block shadow-lg rounded">
           <canvas ref={canvasRef} className="block rounded" />
 
-          {/* SVG overlay for drawing regions */}
           {pageDims.width > 0 && pageDims.height > 0 && children && (
             <div
               className="absolute top-0 left-0"
@@ -189,7 +191,7 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
         </div>
       </div>
 
-      {/* Floating zoom controls */}
+      {/* Zoom controls */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-white/90 backdrop-blur border border-zinc-200 rounded-lg px-2 py-1 shadow-sm z-20">
         <button
           onClick={zoomOut}
