@@ -138,7 +138,9 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   // ── Vision analysis for wall regions (Step 2) ──────────────────────────────
   const triggerVisionAnalysis = useCallback(
     async (pageIndex: number) => {
-      if (!pdfUrl || !session) return;
+      // Read session fresh from store — the closure may hold a stale null
+      const currentSession = useTakeoffStore.getState().session;
+      if (!pdfUrl || !currentSession) return;
       setVisionLoading(pageIndex, true);
 
       try {
@@ -185,7 +187,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         for (const suggestion of suggestions) {
           const region: TakeoffRegion = {
             id: uuid(),
-            session_id: session.id,
+            session_id: currentSession.id,
             page_index: pageIndex,
             label: suggestion.label,
             wall_type: suggestion.wall_type,
@@ -207,7 +209,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         setVisionLoading(pageIndex, false);
       }
     },
-    [pdfUrl, session, addRegion, setVisionLoading, setVisionResults]
+    [pdfUrl, addRegion, setVisionLoading, setVisionResults]
   );
 
   // ── Page selection confirmed ───────────────────────────────────────────────
@@ -261,44 +263,44 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   // ── Loading state ──────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="h-screen bg-zinc-950 flex items-center justify-center">
-        <div className="h-6 w-6 rounded-full border-2 border-zinc-600 border-t-blue-400 animate-spin" />
+      <div className="h-screen bg-white flex items-center justify-center">
+        <div className="h-6 w-6 rounded-full border-2 border-zinc-300 border-t-blue-500 animate-spin" />
       </div>
     );
   }
 
   if (!pdfUrl) {
     return (
-      <div className="h-screen bg-zinc-950 flex items-center justify-center">
+      <div className="h-screen bg-white flex items-center justify-center">
         <p className="text-zinc-500 text-sm">No document found for this project.</p>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col bg-zinc-950">
+    <div className="h-screen flex flex-col bg-white">
       {/* Header */}
-      <div className="shrink-0 px-4 py-2.5 border-b border-zinc-800 flex items-center gap-3">
+      <div className="shrink-0 px-4 py-2.5 border-b border-zinc-200 flex items-center gap-3">
         <button
           onClick={() => router.push(`/projects/${projectId}`)}
-          className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-100 text-sm transition-colors"
+          className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-900 text-sm transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Back
         </button>
 
-        <div className="h-4 w-px bg-zinc-800" />
+        <div className="h-4 w-px bg-zinc-200" />
 
-        <h1 className="text-sm font-medium text-zinc-300">Insulation Takeoff</h1>
+        <h1 className="text-sm font-medium text-zinc-800">Insulation Takeoff</h1>
 
-        <div className="h-4 w-px bg-zinc-800" />
+        <div className="h-4 w-px bg-zinc-200" />
 
-        <span className="text-xs text-blue-400 bg-blue-950 border border-blue-800 rounded px-2 py-0.5">
+        <span className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
           {stepLabel}
         </span>
 
         {isClassifying && (
-          <span className="flex items-center gap-1.5 text-xs text-amber-400 ml-auto">
+          <span className="flex items-center gap-1.5 text-xs text-amber-600 ml-auto">
             <Loader2 className="h-3 w-3 animate-spin" />
             AI analyzing pages…
           </span>
