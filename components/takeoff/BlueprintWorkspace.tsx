@@ -31,9 +31,10 @@ const SCALE_MIN = 0.3;
 const SCALE_MAX = 3.0;
 const DEFAULT_SCALE = 1.0;
 
-// Native PDF page dimensions used for the SVG viewBox
-const PDF_PAGE_WIDTH = 816;
-const PDF_PAGE_HEIGHT = 1056;
+// Render the PDF at this CSS width — the canvas will be rendered
+// at devicePixelRatio × this value for sharp Retina display
+const PDF_PAGE_WIDTH = 1200;
+const PDF_PAGE_HEIGHT = 1552; // approximate 8.5x11 aspect ratio at 1200w
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -173,7 +174,7 @@ export function BlueprintWorkspace({
             <Document
               file={pdfUrl}
               loading={
-                <div className="flex items-center justify-center w-[816px] h-[400px]">
+                <div className="flex items-center justify-center w-[1200px] h-[600px]">
                   <Loader2 className="h-8 w-8 text-zinc-500 animate-spin" />
                 </div>
               }
@@ -184,6 +185,7 @@ export function BlueprintWorkspace({
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
                   width={PDF_PAGE_WIDTH}
+                  devicePixelRatio={typeof window !== 'undefined' ? window.devicePixelRatio : 2}
                 />
 
                 {/* Region overlay — positioned on top of the page */}

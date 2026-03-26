@@ -151,7 +151,8 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         const pdf = await loadingTask.promise;
         const page = await pdf.getPage(pageIndex + 1);
 
-        const viewport = page.getViewport({ scale: 1.5 });
+        // Scale 3.0 for high-quality image — Claude needs crisp text to read dimensions
+        const viewport = page.getViewport({ scale: 3.0 });
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
