@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 
-const PDFENGINE_URL = process.env.PDFENGINE_URL ?? '';
+const PDFENGINE_URL = process.env.PDFENGINE_BASE_URL ?? process.env.PDFENGINE_URL ?? '';
 const USE_MOCK = !PDFENGINE_URL;
 
 export async function POST(request: NextRequest) {
