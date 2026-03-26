@@ -198,23 +198,23 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
                       value={lengthInput}
                       onChange={(e) => setLengthInput(e.target.value)}
                       onBlur={handleLengthBlur}
-                      className="w-full text-center text-base font-semibold text-white bg-zinc-100 border border-zinc-200 rounded px-1 py-0.5 focus:outline-none focus:border-blue-500"
+                      className="w-full text-center text-base font-semibold text-zinc-900 bg-white border border-zinc-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-500"
                     />
                   ) : (
-                    <p className="text-base font-semibold text-white tabular-nums">
+                    <p className="text-base font-semibold text-zinc-900 tabular-nums">
                       {wallLength.toFixed(1)}
                     </p>
                   )}
                 </div>
                 <div className="bg-zinc-100 rounded-lg px-3 py-3 text-center">
                   <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Height</p>
-                  <p className="text-base font-semibold text-white tabular-nums">
+                  <p className="text-base font-semibold text-zinc-900 tabular-nums">
                     {heightIsSelected ? `${effectiveHeight}'` : '—'}
                   </p>
                 </div>
                 <div className="bg-zinc-100 rounded-lg px-3 py-3 text-center">
                   <p className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1">Gross SF</p>
-                  <p className="text-base font-semibold text-white tabular-nums">
+                  <p className="text-base font-semibold text-zinc-900 tabular-nums">
                     {heightIsSelected ? Math.round(grossSf).toLocaleString() : '—'}
                   </p>
                 </div>
@@ -290,8 +290,8 @@ export function RegionModal({ regionId, onAnalyze }: RegionModalProps) {
 
               {/* NET result */}
               <div className="rounded-xl bg-green-50 border border-green-200 px-5 py-4 text-center">
-                <p className="text-[10px] text-green-400/70 uppercase tracking-widest mb-1">Net Insulation SF</p>
-                <p className="text-4xl font-bold text-green-400 tabular-nums">
+                <p className="text-[10px] text-green-700 uppercase tracking-widest mb-1">Net Insulation SF</p>
+                <p className="text-4xl font-bold text-green-700 tabular-nums">
                   {heightIsSelected ? Math.round(netSf).toLocaleString() : '—'}
                 </p>
                 {heightIsSelected && openingsSf > 0 && (
