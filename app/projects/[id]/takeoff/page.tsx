@@ -66,10 +66,23 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     loadDocument();
   }, [projectId]);
 
-  // ── Classify pages with Vision AI once PDF page count is known ─────────────
+  // ── Classify pages with Vision AI (cached per document) ─────────────────────
   const classifyPages = useCallback(async (url: string, numPages: number) => {
     if (classifyStartedRef.current) return;
     classifyStartedRef.current = true;
+
+    // Check localStorage cache first
+    const cacheKey = `takeoff_classify_${documentId}_${numPages}`;
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const results: PageClassification[] = JSON.parse(cached);
+        setClassifications(results);
+        setClassificationDone(true);
+        return;
+      }
+    } catch {}
+
     setIsClassifying(true);
 
     try {
@@ -79,7 +92,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       const loadingTask = pdfjs.getDocument(url);
       const pdf = await loadingTask.promise;
 
-      // Render all pages as low-res thumbnails (scale 0.5 ≈ 400px wide)
+      // Render all pages as low-res thumbnails (scale 0.5)
       const pages: Array<{ image_base64: string }> = [];
       for (let i = 1; i <= numPages; i++) {
         const page = await pdf.getPage(i);
@@ -104,6 +117,11 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         const data = await response.json();
         const results: PageClassification[] = data.pages ?? [];
         setClassifications(results);
+
+        // Cache to localStorage
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(results));
+        } catch {}
       }
     } catch (err) {
       console.error('[TakeoffPage] Page classification failed:', err);
@@ -111,7 +129,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       setIsClassifying(false);
       setClassificationDone(true);
     }
-  }, []);
+  }, [documentId]);
 
   // ── When PDF loads, trigger classification ─────────────────────────────────
   const handlePdfLoaded = useCallback((numPages: number) => {

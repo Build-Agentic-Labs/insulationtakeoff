@@ -69,18 +69,25 @@ export function BlueprintViewer({ pdfUrl, pageNumber, children }: BlueprintViewe
       const effectiveScale = fitScale * scale;
       const viewport = page.getViewport({ scale: effectiveScale });
 
-      // Canvas CSS size = viewport, canvas pixel size = viewport * dpr
+      // Canvas CSS size = viewport, pixel size = viewport * renderDpr
+      // Cap pixel dimensions to browser max (~16384px) to prevent crash
+      const MAX_CANVAS_PX = 16000;
+      const maxPixelDim = Math.max(viewport.width, viewport.height) * dpr;
+      const renderDpr = maxPixelDim > MAX_CANVAS_PX
+        ? (MAX_CANVAS_PX / Math.max(viewport.width, viewport.height))
+        : dpr;
+
       canvas.style.width = `${viewport.width}px`;
       canvas.style.height = `${viewport.height}px`;
-      canvas.width = Math.floor(viewport.width * dpr);
-      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.width = Math.floor(viewport.width * renderDpr);
+      canvas.height = Math.floor(viewport.height * renderDpr);
 
       setPageDims({ width: viewport.width, height: viewport.height });
 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.setTransform(renderDpr, 0, 0, renderDpr, 0, 0);
 
       const renderTask = page.render({ canvasContext: ctx, viewport });
       renderTaskRef.current = renderTask;
