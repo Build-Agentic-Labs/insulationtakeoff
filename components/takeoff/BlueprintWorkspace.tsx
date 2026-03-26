@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Loader2 } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
@@ -12,10 +12,7 @@ import { RegionModal } from '@/components/takeoff/RegionModal';
 import { RunningTotal } from '@/components/takeoff/RunningTotal';
 import { ToolBar } from '@/components/takeoff/ToolBar';
 
-// Set the pdf.js worker once at module level
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface BlueprintWorkspaceProps {
   pdfUrl: string;
@@ -24,19 +21,11 @@ interface BlueprintWorkspaceProps {
   onGenerateQuote: () => void;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const SCALE_STEP = 0.2;
+// Base width at 100% zoom. Zoom changes this value directly (no CSS transform).
+const BASE_WIDTH = 1000;
+const SCALE_STEP = 0.15;
 const SCALE_MIN = 0.3;
 const SCALE_MAX = 3.0;
-const DEFAULT_SCALE = 1.0;
-
-// Render the PDF at this CSS width — the canvas will be rendered
-// at devicePixelRatio × this value for sharp Retina display
-const PDF_PAGE_WIDTH = 1200;
-const PDF_PAGE_HEIGHT = 1552; // approximate 8.5x11 aspect ratio at 1200w
-
-// ─── Component ────────────────────────────────────────────────────────────────
 
 export function BlueprintWorkspace({
   pdfUrl,
@@ -54,27 +43,52 @@ export function BlueprintWorkspace({
   const visionLoading = useTakeoffStore((s) => s.visionLoading);
   const getRegionsForPage = useTakeoffStore((s) => s.getRegionsForPage);
 
-  const [scale, setScale] = useState<number>(DEFAULT_SCALE);
+  const [scale, setScale] = useState(1.0);
+  const [pageHeight, setPageHeight] = useState(0);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const pageRegions = getRegionsForPage(activePageIndex);
   const isVisionLoading = Boolean(visionLoading[activePageIndex]);
 
-  // ── Zoom ──────────────────────────────────────────────────────────────────
+  // Actual pixel width passed to react-pdf — zoom changes this, not CSS transform
+  const renderWidth = Math.round(BASE_WIDTH * scale);
 
+  // Zoom handlers
   const handleZoomIn = useCallback(() => {
-    setScale((prev) => Math.min(SCALE_MAX, Math.round((prev + SCALE_STEP) * 10) / 10));
+    setScale((s) => Math.min(SCALE_MAX, Math.round((s + SCALE_STEP) * 100) / 100));
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    setScale((prev) => Math.max(SCALE_MIN, Math.round((prev - SCALE_STEP) * 10) / 10));
+    setScale((s) => Math.max(SCALE_MIN, Math.round((s - SCALE_STEP) * 100) / 100));
   }, []);
 
-  // ── Region interactions ───────────────────────────────────────────────────
+  // Intercept Ctrl+wheel on the scroll container for zoom (prevents page zoom)
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        setScale((s) => Math.min(SCALE_MAX, Math.max(SCALE_MIN, Math.round((s + delta) * 100) / 100)));
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
 
+  // Track the actual rendered page height for the SVG overlay
+  const handlePageRenderSuccess = useCallback(() => {
+    // After react-pdf renders, measure the actual canvas height
+    const canvas = scrollContainerRef.current?.querySelector('canvas');
+    if (canvas) {
+      setPageHeight(canvas.clientHeight);
+    }
+  }, []);
+
+  // Region interactions
   const handleRegionClick = useCallback(
-    (regionId: string) => {
-      openModal(regionId);
-    },
+    (regionId: string) => openModal(regionId),
     [openModal]
   );
 
@@ -104,8 +118,7 @@ export function BlueprintWorkspace({
     [activePageIndex, sessionId, getRegionsForPage, addRegion, openModal]
   );
 
-  // ── Vision analysis ───────────────────────────────────────────────────────
-
+  // Analyze region via API
   const handleAnalyzeRegion = useCallback(
     async (regionId: string): Promise<RegionAnalysisResult> => {
       const session = useTakeoffStore.getState().session;
@@ -133,15 +146,12 @@ export function BlueprintWorkspace({
     [documentId]
   );
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   return (
     <div className="flex h-full bg-white">
-      {/* ── Left: blueprint area ─────────────────────────────────────────── */}
+      {/* Left: blueprint area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar: page tabs + toolbar */}
+        {/* Top bar */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 bg-zinc-50 shrink-0">
-          {/* Page tabs */}
           <div className="flex items-center gap-1">
             {selectedPages.map((pageIndex) => {
               const isActive = pageIndex === activePageIndex;
@@ -161,45 +171,48 @@ export function BlueprintWorkspace({
             })}
           </div>
 
-          {/* Toolbar */}
-          <ToolBar onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} />
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-zinc-400 tabular-nums">{Math.round(scale * 100)}%</span>
+            <ToolBar onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} />
+          </div>
         </div>
 
-        {/* Blueprint canvas */}
-        <div className="flex-1 overflow-auto flex items-center justify-center bg-white p-6">
-          <div
-            className="relative"
-            style={{ transform: `scale(${scale})`, transformOrigin: 'top center' }}
-          >
+        {/* Blueprint canvas — scrollable, no CSS transform */}
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-auto bg-zinc-100"
+        >
+          <div className="flex justify-center p-6 min-h-full">
             <Document
               file={pdfUrl}
               loading={
-                <div className="flex items-center justify-center w-[1200px] h-[600px]">
-                  <Loader2 className="h-8 w-8 text-zinc-500 animate-spin" />
+                <div className="flex items-center justify-center" style={{ width: renderWidth, height: 600 }}>
+                  <Loader2 className="h-8 w-8 text-zinc-400 animate-spin" />
                 </div>
               }
             >
-              <div className="relative">
+              <div className="relative inline-block shadow-xl">
                 <Page
                   pageNumber={activePageIndex + 1}
                   renderTextLayer={false}
                   renderAnnotationLayer={false}
-                  width={PDF_PAGE_WIDTH}
-                  devicePixelRatio={typeof window !== 'undefined' ? window.devicePixelRatio : 2}
+                  width={renderWidth}
+                  devicePixelRatio={typeof window !== 'undefined' ? Math.max(window.devicePixelRatio, 2) : 2}
+                  onRenderSuccess={handlePageRenderSuccess}
                 />
 
-                {/* Region overlay — positioned on top of the page */}
-                <div className="absolute inset-0">
+                {/* Region overlay — exact same size as the rendered page */}
+                <div className="absolute inset-0" style={{ width: renderWidth, height: pageHeight || undefined }}>
                   <RegionOverlay
-                    pageWidth={PDF_PAGE_WIDTH}
-                    pageHeight={PDF_PAGE_HEIGHT}
+                    pageWidth={renderWidth}
+                    pageHeight={pageHeight || renderWidth * 1.294}
                     regions={pageRegions}
                     onRegionClick={handleRegionClick}
                     onRegionDrawn={handleRegionDrawn}
                   />
                 </div>
 
-                {/* Vision loading spinner overlay */}
+                {/* Vision loading spinner */}
                 {isVisionLoading && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[1px] rounded">
                     <Loader2 className="h-8 w-8 text-blue-600 animate-spin mb-2" />
@@ -212,16 +225,14 @@ export function BlueprintWorkspace({
         </div>
       </div>
 
-      {/* ── Right: regions panel ──────────────────────────────────────────── */}
+      {/* Right: regions panel */}
       <div className="w-[240px] flex flex-col border-l border-zinc-200 bg-zinc-50 shrink-0">
-        {/* Header */}
         <div className="px-4 py-3 border-b border-zinc-200 shrink-0">
           <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
             Wall Regions
           </h2>
         </div>
 
-        {/* Region list */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {pageRegions.length === 0 ? (
             <div className="text-center mt-6 px-2 space-y-3">
@@ -231,11 +242,9 @@ export function BlueprintWorkspace({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
               </div>
-              <p className="text-sm font-medium text-zinc-700">
-                Draw wall regions
-              </p>
+              <p className="text-sm font-medium text-zinc-700">Draw wall regions</p>
               <p className="text-xs text-zinc-500 leading-relaxed">
-                Use the rectangle tool to draw a box around each exterior wall section. AI will measure the dimensions inside each region.
+                Use the rectangle tool to draw a box around each exterior wall section. AI will measure the dimensions inside.
               </p>
               <button
                 onClick={() => setTool('rectangle')}
@@ -255,7 +264,6 @@ export function BlueprintWorkspace({
           )}
         </div>
 
-        {/* Draw more regions */}
         {pageRegions.length > 0 && (
           <div className="px-3 py-2 border-t border-zinc-200 shrink-0">
             <button
@@ -267,11 +275,10 @@ export function BlueprintWorkspace({
           </div>
         )}
 
-        {/* Spacer absorbed by flex-1 above; RunningTotal pinned to bottom */}
         <RunningTotal onGenerateQuote={onGenerateQuote} />
       </div>
 
-      {/* ── Region modal ──────────────────────────────────────────────────── */}
+      {/* Region modal */}
       {modalRegionId !== null && (
         <RegionModal
           regionId={modalRegionId}
