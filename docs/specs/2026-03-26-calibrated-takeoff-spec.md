@@ -472,21 +472,42 @@ type PdfPoint = { x: number; y: number }; // PDF-space (72 DPI points)
 
 type MeasurementBasis = 'exterior_face' | 'stud_line' | 'centerline' | 'sheathing_line';
 
-interface WallTrace {
+// ── Unified Geometry ──────────────────────────────────────────────────────
+
+// Both linear and area traces share a common base.
+// Linear: points form a polyline (or closed polygon for perimeter).
+//         Each segment (points[i] → points[i+1]) has independent classification.
+// Area:   points form a closed polygon. Area computed via shoelace formula.
+//         The entire trace has one classification (no per-segment split).
+
+interface Trace {
   id: string;
   page_index: number;
+  type: 'linear' | 'area';
   points: PdfPoint[];
-  is_closed: boolean;
+  is_closed: boolean;            // Linear: true if perimeter loop. Area: always true.
   is_locked: boolean;
+  label: string;                 // User-editable name: "Main House Perimeter", "Attic Area"
 }
 
-interface SegmentClassification {
-  segment_index: number;       // Index into trace.points (segment = points[i] → points[i+1])
-  label: string;               // "Wall 1", or user-edited name
-  wall_type: 'exterior' | 'garage' | 'basement' | 'other';
-  wall_height_ft: number;
-  openings: Opening[];
+// ── Classification (general, not wall-specific) ───────────────────────────
+
+// For linear traces: one classification per segment (points[i] → points[i+1])
+// For area traces: one classification for the whole trace (segment_index = -1)
+
+interface TraceClassification {
+  trace_id: string;
+  segment_index: number;         // -1 for area traces (whole-trace classification)
+  label: string;                 // "North Wall", "Attic Area", etc.
+  assembly_scope: AssemblyScope;
+  wall_height_ft?: number;       // For linear/wall scopes only (null for area scopes)
+  openings: Opening[];           // For linear/wall scopes only (empty for area)
+  install_method: InstallMethod;
+  notes: string[];               // Field risk notes, special conditions, QA flags
+  manual_override_reason?: string; // If user overrode a generated value, record why
 }
+
+// ── Session ───────────────────────────────────────────────────────────────
 
 interface TakeoffSession {
   id: string;
@@ -496,9 +517,50 @@ interface TakeoffSession {
   measurement_basis: MeasurementBasis;
   selected_pages: number[];
   calibrations: Record<number, Calibration>;  // Per-page, keyed by page_index
-  traces: WallTrace[];
-  classifications: SegmentClassification[];   // Separate from geometry
+  traces: Trace[];                             // Unified linear + area
+  classifications: TraceClassification[];      // Separate from geometry
+  contractor_config_id?: string;               // Link to contractor defaults
 }
+
+// ── Source Provenance ─────────────────────────────────────────────────────
+
+// Every generated assembly item and installation item tracks where it came from.
+
+interface SourceProvenance {
+  trace_id: string;
+  segment_index?: number;        // For linear segments
+  page_index: number;
+  generation_method: 'user_trace' | 'rule_generated' | 'manual_entry' | 'imported';
+  rule_id?: string;              // If rule-generated, which rule
+  confidence: 'high' | 'medium' | 'low';
+}
+```
+
+### Derived Quantities
+
+All quantities are computed, never stored as canonical truth:
+
+```typescript
+// For linear traces:
+function segmentLength(trace: Trace, i: number, cal: Calibration): number {
+  return pdfDistance(trace.points[i], trace.points[i + 1]) / cal.pdfPointsPerFoot;
+}
+
+// For area traces (shoelace formula):
+function traceArea(trace: Trace, cal: Calibration): number {
+  const pts = trace.points;
+  let sum = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length;
+    sum += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+  }
+  const areaPdfPoints = Math.abs(sum) / 2;
+  return areaPdfPoints / (cal.pdfPointsPerFoot ** 2); // Convert to square feet
+}
+
+// Gross SF (walls): segmentLength × wall_height_ft
+// Gross SF (area scopes): traceArea directly
+// Net SF: gross - sum(opening.area_sf)
 ```
 
 ### Coordinate System
@@ -563,46 +625,77 @@ ALTER TABLE takeoff_sessions
 
 ---
 
-## Implementation Order
+## Implementation Order & Phase Boundaries
 
-### Phase 1: Measurement Foundation (4-5 days)
-1. **BlueprintViewer upgrades** — `cssToPageCoords`, `pageCoordsToCss`, cursor modes, quality at zoom
-2. **Calibration system** — CalibrationOverlay (primary + verification), CalibrationBanner, variance check
-3. **Linear tracing** — WallTraceOverlay (click-to-trace polyline, live calibrated length labels)
-4. **Segment classification** — SegmentList (assembly scope, height, per-segment)
-5. **Store redesign** — new TakeoffSession with calibration + traces + classifications
-6. **Workspace integration** — wire components, toolbar, step flow
+### What "ships" means per phase
+
+| Phase | Ships? | What the user can do after this phase |
+|-------|--------|---------------------------------------|
+| 1 | **Yes — MVP** | Calibrate scale, trace walls, classify by scope + height, see SF totals, export quantities |
+| 2 | **Yes — v1.0** | Also: area traces (attic/crawl/floor), itemized openings, measurement basis |
+| 3 | Scaffolded | Assembly items generated from traces + default install items. Not full rule engine. |
+| 4 | Scaffolded | Summary grouped by scope. Quote export as JSON/CSV. No pricing engine yet. |
+| 5 | Polish | Vertex editing, undo/redo, lock/unlock, group ops |
+| 6 | Future | OCR helper, layer stripping, snap-to-vector, rule engine, pricing |
+
+### Phase 1: Measurement MVP (4-5 days)
+
+**Goal:** User can calibrate, trace walls, classify segments, and see accurate SF totals.
+
+1. **Types + store** — `Trace`, `TraceClassification`, `Calibration`, `TakeoffSession` (unified linear + area types from day 1, even though area UI comes in Phase 2)
+2. **BlueprintViewer upgrades** — `cssToPageCoords()`, `pageCoordsToCss()`, crosshair cursor, quality at zoom
+3. **Calibration system** — CalibrationOverlay (primary + verification), CalibrationBanner, variance check
+4. **Linear tracing** — TraceOverlay (polyline click-to-trace, live calibrated length labels)
+5. **Segment classification** — SegmentList (assembly scope dropdown, height picker, per-segment)
+6. **Running total** — recomputed from geometry + classification (never stored)
+7. **Workspace integration** — toolbar (pointer / calibrate / trace), page tabs, step flow
+8. **Basic persistence** — save session to Supabase on "Save" or "Generate Quote"
+
+**Exit criteria:** Trace the Gamache perimeter → total LF within ±2% of gold (555 LF).
 
 ### Phase 2: Area Mode + Openings (3 days)
-7. **Area tracing** — polygon click-to-trace with shoelace area calculation (for attic, crawl, floors)
-8. **OpeningsEditor** — itemized openings with presets (door, window, garage door, sliding)
-9. **MeasurementBasisSelector** — session-level setting
 
-### Phase 3: Assembly + Installation Items (3 days)
-10. **Assembly classification engine** — maps traces to building scopes
-11. **Installation item generation** — assembly → insulation field + accessories (poly, baffles, foam/caulk, supports, groundcover)
-12. **ContractorConfig** — jurisdiction, climate zone, default specs per assembly scope
-13. **Field notes** — per-segment/per-assembly notes for inaccessible areas, special conditions, QA flags
+**Goal:** Full measurement coverage — walls AND area scopes (attic, crawl, floors) + openings.
 
-### Phase 4: Quote & Persistence (2 days)
-14. **TakeoffSummary** — grouped by assembly scope, shows gross + opening deductions + net per tier
-15. **Quote line-item generation** — installation items → pricing rows (material, labor, burden, profit)
-16. **Session persistence** — save calibration + traces + assemblies + items to Supabase
-17. **Quote wiring** — feed to existing quote page
+9. **Area tracing** — same TraceOverlay in 'area' mode (closed polygon, shoelace area calc, SF label)
+10. **OpeningsEditor** — itemized openings with presets per segment (door, window, garage door, sliding)
+11. **MeasurementBasisSelector** — session-level dropdown in workspace header
+12. **Multi-page tracing** — traces on different pages, each with own calibration
+
+**Exit criteria:** Complete Gamache takeoff (walls + attic + crawl + garage ceiling) matches gold within ±3%.
+
+### Phase 3: Assembly + Line Items (3 days)
+
+**Goal:** Traces generate structured assembly items and installation line items.
+
+13. **Assembly classification engine** — maps traces to `AssemblyItem` objects
+14. **Installation item generation** — assembly → field insulation + accessories (poly, baffles, foam/caulk, supports, groundcover). Simple rules, not a full engine.
+15. **ContractorConfig** — defaults per assembly scope (jurisdiction, install method, product spec)
+16. **Field notes** — per-classification notes for special conditions
+17. **Source provenance** — every generated item tracks trace_id, page, generation method
+
+### Phase 4: Summary + Export (2 days)
+
+18. **TakeoffSummary** — grouped by assembly scope with gross/opening/net per tier + audit info
+19. **Quote export** — JSON/CSV of line items (material quantities, not pricing yet)
+20. **Session persistence** — full save/load with calibration + traces + classifications + items
 
 ### Phase 5: Editing & Polish (2 days)
-18. **Vertex editing** — move, insert, delete points
-19. **Undo/redo** — point-level undo stack
-20. **Lock/unlock traces** — prevent accidental edits
-21. **Group operations** — batch assign scope + height
 
-### Phase 6: Enhancements (future)
-22. **OCR dimension helper** — suggest values near clicked text
-23. **PDF layer stripping** — hide non-structural layers
-24. **Snap to vector** — snap to PDF line endpoints
-25. **Rule-driven accessory quantities** — baffles from rafter bay count, groundcover from crawl area, etc.
-26. **Non-geometry quantities** — EA counts for attic hatches, fan boxes, penetrations
-27. **Multi-scale page support** — detect and handle detail callouts
+21. **Vertex editing** — move, insert, delete points (recomputes all derived values)
+22. **Undo/redo** — point-level undo stack
+23. **Lock/unlock traces** — prevent accidental edits after review
+24. **Group operations** — multi-select segments → batch assign scope + height
+
+### Phase 6: Pricing + Enhancements (future)
+
+25. **Pricing engine** — unit prices, labor, burden, overhead, profit per line item
+26. **Rule-driven accessories** — baffles from rafter bay count, groundcover from crawl area
+27. **Non-geometry quantities** — EA counts for attic hatches, fan boxes, penetrations
+28. **OCR dimension helper** — suggest values near clicked text
+29. **PDF layer stripping** — hide non-structural layers
+30. **Snap to vector** — snap to PDF line endpoints
+31. **Manual override tracking** — `manual_override_reason` on any generated value
 
 ---
 
