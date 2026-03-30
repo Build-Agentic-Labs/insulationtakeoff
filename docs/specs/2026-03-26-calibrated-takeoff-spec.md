@@ -285,7 +285,164 @@ TOTALS
   Total net SF: X,XXX
 ```
 
-"Generate Quote →" feeds confirmed data to existing quote page.
+"Generate Quote →" feeds confirmed data to the assembly → installation items → pricing layers below.
+
+---
+
+## Four-Layer Architecture
+
+The system is not just a measuring tool. It produces contractor-ready insulation bids.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Layer 1: MEASUREMENT                                │
+│  Calibration, linear traces, area traces, openings   │
+│  Output: geometry + classified segments              │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│  Layer 2: ASSEMBLY CLASSIFICATION                    │
+│  Maps geometry to building scopes                    │
+│  (ext wall, garage wall, attic floor, crawl, etc.)   │
+│  Output: assembly scopes with SF/LF quantities       │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│  Layer 3: INSTALLATION LINE ITEMS                    │
+│  Converts assemblies to quoteable rows               │
+│  Includes: insulation field + accessories            │
+│  (poly, baffles, foam/caulk, groundcover, etc.)      │
+│  Output: line items with qty, unit, product           │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│  Layer 4: PRICING                                    │
+│  Unit price, labor piece rate, burden, margin         │
+│  Output: contractor-ready bid with cost + profit      │
+└─────────────────────────────────────────────────────┘
+```
+
+### Layer 2: Assembly Classification
+
+Each traced segment or area is classified into a building assembly scope:
+
+```typescript
+type AssemblyScope =
+  | 'exterior_wall_2x6'
+  | 'exterior_wall_2x4'
+  | 'garage_wall'
+  | 'basement_wall'
+  | 'knee_wall'
+  | 'attic_floor'
+  | 'crawlspace_floor'
+  | 'garage_ceiling'
+  | 'sound_floor'
+  | 'rim_joist'
+  | 'cathedral_ceiling'
+  | 'cantilever_floor'
+  | 'duct_wrap_zone'
+  | 'groundcover_zone';
+
+interface AssemblyItem {
+  id: string;
+  scope: AssemblyScope;
+  source_trace_id: string;
+  source_segment_indexes: number[];  // Which segments contribute
+  measurement_type: 'linear' | 'area';
+  quantity_sf: number;               // Derived from geometry
+  quantity_lf?: number;              // For linear scopes
+  wall_height_ft?: number;           // For wall scopes
+  install_method: InstallMethod;
+  notes: string[];                   // Field risk notes, special conditions
+}
+
+type InstallMethod =
+  | 'batt_kraft'
+  | 'batt_unfaced'
+  | 'blown_fiberglass'
+  | 'blown_cellulose'
+  | 'spray_foam_open'
+  | 'spray_foam_closed'
+  | 'rigid_board'
+  | 'dense_pack';
+```
+
+### Layer 3: Installation Line Items
+
+Assemblies generate installation line items — both the insulation itself and required accessories:
+
+```typescript
+interface InstallationItem {
+  id: string;
+  scope_type:
+    | 'insulation_field'     // The insulation body
+    | 'vapor_barrier'        // Poly
+    | 'ventilation_prep'     // Baffles / rafter vents
+    | 'air_sealing'          // Foam & caulk
+    | 'support_system'       // Insulation supports, netting
+    | 'ground_cover'         // Crawlspace poly
+    | 'foam_board'           // Headers, rim joist rigid
+    | 'duct_wrap'            // Duct insulation
+    | 'access_cover'         // Attic hatch cover
+    | 'custom';
+  source_assembly_id: string;
+  product_spec: string;              // e.g., "R-21×15 Kraft"
+  quantity: number;
+  unit: 'SF' | 'LF' | 'EA' | 'BF' | 'LOT';
+  note?: string;
+}
+```
+
+**Generation rules (examples):**
+
+| Assembly | Generates | Rule |
+|----------|-----------|------|
+| Exterior wall 2×6 | R-21 Batt (SF) + 6-mil Poly (SF) | Poly SF = wall SF |
+| Attic floor | R-49 Blown (SF) + Baffles (EA) | Baffles = eave LF ÷ 14.5" bay spacing |
+| Crawlspace floor | R-38 Batt (SF) + Supports (SF) + Groundcover (SF) | Groundcover = crawl area |
+| Rim joist | Closed-cell spray foam (BF) or R-19 batt (LF) | BF = LF × joist depth × thickness |
+| Garage ceiling | R-19 Blown (SF) | 1:1 from area trace |
+| Any wall scope | Foam & caulk (LOT or EA) | Per penetration count or LOT |
+
+### Layer 4: Pricing
+
+```typescript
+interface QuoteLineItem {
+  installation_item_id: string;
+  description: string;              // "R-21×15 Kraft Batt + Poly — Ext Walls 9'"
+  quantity: number;
+  unit: string;
+  material_unit_price: number;
+  labor_unit_price: number;
+  material_total: number;            // Derived
+  labor_total: number;               // Derived
+  burden_pct: number;                // Payroll burden %
+  overhead_pct: number;
+  profit_pct: number;
+  line_total: number;                // Derived
+}
+```
+
+This matches the Gamache workbook structure: insulation body + accessories → pricing with material, labor, burden, cost, and profit columns.
+
+### Assembly/Spec Configuration
+
+Not hardcoded. Stored as contractor-level defaults:
+
+```typescript
+interface ContractorConfig {
+  jurisdiction: string;              // "WA" — affects code requirements
+  climate_zone: number;              // 4-5 for Pacific NW
+  code_year: string;                 // "2021 IECC"
+  default_specs: Record<AssemblyScope, {
+    install_method: InstallMethod;
+    product_spec: string;
+    accessories: string[];           // Auto-generated items
+  }>;
+}
+```
+
+This keeps the takeoff reusable when a contractor changes brands, local specs, or code packages.
 
 ---
 
@@ -408,32 +565,44 @@ ALTER TABLE takeoff_sessions
 
 ## Implementation Order
 
-### Phase 1: Core Measurement (4-5 days)
+### Phase 1: Measurement Foundation (4-5 days)
 1. **BlueprintViewer upgrades** — `cssToPageCoords`, `pageCoordsToCss`, cursor modes, quality at zoom
 2. **Calibration system** — CalibrationOverlay (primary + verification), CalibrationBanner, variance check
-3. **Wall tracing** — WallTraceOverlay (click-to-trace polyline, live length labels)
-4. **Segment classification** — SegmentList (wall type, height, per-segment)
-5. **Store redesign** — new TakeoffSession model with calibration + traces + classifications
+3. **Linear tracing** — WallTraceOverlay (click-to-trace polyline, live calibrated length labels)
+4. **Segment classification** — SegmentList (assembly scope, height, per-segment)
+5. **Store redesign** — new TakeoffSession with calibration + traces + classifications
 6. **Workspace integration** — wire components, toolbar, step flow
 
-### Phase 2: Openings & Summary (2 days)
-7. **OpeningsEditor** — itemized openings with presets
-8. **MeasurementBasisSelector** — session-level setting
-9. **TakeoffSummary** — grouped display with audit trail
-10. **Session persistence** — save to Supabase
+### Phase 2: Area Mode + Openings (3 days)
+7. **Area tracing** — polygon click-to-trace with shoelace area calculation (for attic, crawl, floors)
+8. **OpeningsEditor** — itemized openings with presets (door, window, garage door, sliding)
+9. **MeasurementBasisSelector** — session-level setting
 
-### Phase 3: Editing & Polish (2 days)
-11. **Vertex editing** — move, insert, delete points
-12. **Undo/redo** — point-level undo stack
-13. **Lock/unlock traces** — prevent accidental edits
-14. **Group operations** — batch assign type + height
-15. **Quote wiring** — feed to existing quote page
+### Phase 3: Assembly + Installation Items (3 days)
+10. **Assembly classification engine** — maps traces to building scopes
+11. **Installation item generation** — assembly → insulation field + accessories (poly, baffles, foam/caulk, supports, groundcover)
+12. **ContractorConfig** — jurisdiction, climate zone, default specs per assembly scope
+13. **Field notes** — per-segment/per-assembly notes for inaccessible areas, special conditions, QA flags
 
-### Phase 4: Enhancements (future)
-16. **OCR dimension helper** — suggest values near clicked text
-17. **PDF layer stripping** — hide non-structural layers
-18. **Snap to vector** — snap to PDF line endpoints
-19. **Multi-scale page support** — detect and handle detail callouts
+### Phase 4: Quote & Persistence (2 days)
+14. **TakeoffSummary** — grouped by assembly scope, shows gross + opening deductions + net per tier
+15. **Quote line-item generation** — installation items → pricing rows (material, labor, burden, profit)
+16. **Session persistence** — save calibration + traces + assemblies + items to Supabase
+17. **Quote wiring** — feed to existing quote page
+
+### Phase 5: Editing & Polish (2 days)
+18. **Vertex editing** — move, insert, delete points
+19. **Undo/redo** — point-level undo stack
+20. **Lock/unlock traces** — prevent accidental edits
+21. **Group operations** — batch assign scope + height
+
+### Phase 6: Enhancements (future)
+22. **OCR dimension helper** — suggest values near clicked text
+23. **PDF layer stripping** — hide non-structural layers
+24. **Snap to vector** — snap to PDF line endpoints
+25. **Rule-driven accessory quantities** — baffles from rafter bay count, groundcover from crawl area, etc.
+26. **Non-geometry quantities** — EA counts for attic hatches, fan boxes, penetrations
+27. **Multi-scale page support** — detect and handle detail callouts
 
 ---
 
