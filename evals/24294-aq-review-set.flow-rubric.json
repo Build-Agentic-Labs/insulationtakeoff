@@ -1,0 +1,154 @@
+{
+  "name": "24294 AQ REVIEW SET - review set baseline",
+  "pdf_path": "/Users/rosendolopez/evinsulation/plans/Test Plans/24294 AQ REVIEW SET.pdf",
+  "page_limit": 10,
+  "pages": [
+    {
+      "page_number": 1,
+      "page_name": "Foundation Plan",
+      "page_type": "foundation",
+      "secondary_page_types": [],
+      "takeoff_relevance": "primary_measurement",
+      "has_dimensions": true,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "floor_foundation_details",
+        "insulated_area_plan_views",
+        "dimensions",
+        "room_names"
+      ]
+    },
+    {
+      "page_number": 2,
+      "page_name": "Main Floor Plan",
+      "page_type": "floor_plan",
+      "secondary_page_types": [],
+      "takeoff_relevance": "primary_measurement",
+      "has_dimensions": true,
+      "is_floor_plan": true,
+      "scan_flags": [
+        "insulated_area_plan_views",
+        "dimensions",
+        "opening_info",
+        "room_names"
+      ]
+    },
+    {
+      "page_number": 3,
+      "page_name": "Main Floor Framing Plan",
+      "page_type": "other",
+      "secondary_page_types": [],
+      "takeoff_relevance": "supporting_evidence",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": []
+    },
+    {
+      "page_number": 4,
+      "page_name": "Basement Floor Plan",
+      "page_type": "floor_plan",
+      "secondary_page_types": [],
+      "takeoff_relevance": "primary_measurement",
+      "has_dimensions": true,
+      "is_floor_plan": true,
+      "scan_flags": [
+        "insulated_area_plan_views",
+        "dimensions",
+        "room_names"
+      ]
+    },
+    {
+      "page_number": 5,
+      "page_name": "Construction Details",
+      "page_type": "detail",
+      "secondary_page_types": [],
+      "takeoff_relevance": "supporting_evidence",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "exterior_wall_details",
+        "roof_ceiling_details",
+        "floor_foundation_details",
+        "enlarged_sections"
+      ]
+    },
+    {
+      "page_number": 6,
+      "page_name": "Building Sections",
+      "page_type": "section",
+      "secondary_page_types": [],
+      "takeoff_relevance": "supporting_evidence",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "height_references",
+        "roof_ceiling_details",
+        "floor_foundation_details"
+      ]
+    },
+    {
+      "page_number": 7,
+      "page_name": "Roof Framing Plan",
+      "page_type": "roof",
+      "secondary_page_types": [],
+      "takeoff_relevance": "primary_measurement",
+      "has_dimensions": true,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "roof_ceiling_details",
+        "insulated_area_plan_views",
+        "dimensions"
+      ]
+    },
+    {
+      "page_number": 8,
+      "page_name": "Building Elevations",
+      "page_type": "elevation",
+      "secondary_page_types": [],
+      "takeoff_relevance": "supporting_evidence",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "height_references",
+        "opening_info"
+      ]
+    },
+    {
+      "page_number": 9,
+      "page_name": "Main Floor Electrical Plan",
+      "page_type": "electrical",
+      "secondary_page_types": [],
+      "takeoff_relevance": "low_value",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": []
+    },
+    {
+      "page_number": 10,
+      "page_name": "Second Floor Electrical Plan",
+      "page_type": "electrical",
+      "secondary_page_types": [],
+      "takeoff_relevance": "low_value",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": []
+    }
+  ],
+  "flow_signals": {
+    "measurement_page": true,
+    "wall_height_reference": true,
+    "insulation_details": false,
+    "opening_identification": true,
+    "attic_scope": true,
+    "crawlspace_scope": true
+  },
+  "expected_readiness": {
+    "missing_requirements": [
+      "insulation_details"
+    ],
+    "low_value_pages": [
+      9,
+      10
+    ]
+  }
+}

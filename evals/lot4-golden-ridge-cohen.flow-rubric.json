@@ -1,0 +1,105 @@
+{
+  "name": "Lot 4 Golden Ridge Cohen - exterior + foundation + roof baseline",
+  "pdf_path": "/Users/rosendolopez/evinsulation/plans/Lot 4-Golden Ridge - Cohen.pdf",
+  "page_limit": 6,
+  "pages": [
+    {
+      "page_number": 1,
+      "page_name": "Front / Rear Elevations",
+      "page_type": "elevation",
+      "secondary_page_types": [],
+      "takeoff_relevance": "supporting_evidence",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "height_references",
+        "opening_info"
+      ]
+    },
+    {
+      "page_number": 2,
+      "page_name": "Side Elevations + Sections",
+      "page_type": "elevation",
+      "secondary_page_types": [
+        "section"
+      ],
+      "takeoff_relevance": "supporting_evidence",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "enlarged_sections",
+        "height_references",
+        "roof_ceiling_details",
+        "floor_foundation_details"
+      ]
+    },
+    {
+      "page_number": 3,
+      "page_name": "Foundation & Floor Framing Plan",
+      "page_type": "foundation",
+      "secondary_page_types": [],
+      "takeoff_relevance": "primary_measurement",
+      "has_dimensions": true,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "floor_foundation_details",
+        "dimensions",
+        "room_names"
+      ]
+    },
+    {
+      "page_number": 4,
+      "page_name": "Main Floor Plan",
+      "page_type": "floor_plan",
+      "secondary_page_types": [],
+      "takeoff_relevance": "primary_measurement",
+      "has_dimensions": true,
+      "is_floor_plan": true,
+      "scan_flags": [
+        "insulated_area_plan_views",
+        "dimensions",
+        "opening_info",
+        "room_names"
+      ]
+    },
+    {
+      "page_number": 5,
+      "page_name": "Roof Framing Plan",
+      "page_type": "roof",
+      "secondary_page_types": [],
+      "takeoff_relevance": "primary_measurement",
+      "has_dimensions": true,
+      "is_floor_plan": false,
+      "scan_flags": [
+        "roof_ceiling_details",
+        "dimensions"
+      ]
+    },
+    {
+      "page_number": 6,
+      "page_name": "Electrical Plan",
+      "page_type": "electrical",
+      "secondary_page_types": [],
+      "takeoff_relevance": "low_value",
+      "has_dimensions": false,
+      "is_floor_plan": false,
+      "scan_flags": []
+    }
+  ],
+  "flow_signals": {
+    "measurement_page": true,
+    "wall_height_reference": true,
+    "insulation_details": false,
+    "opening_identification": true,
+    "attic_scope": true,
+    "crawlspace_scope": true
+  },
+  "expected_readiness": {
+    "missing_requirements": [
+      "insulation_details"
+    ],
+    "low_value_pages": [
+      6
+    ]
+  }
+}

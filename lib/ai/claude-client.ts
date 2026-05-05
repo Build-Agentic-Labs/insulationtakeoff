@@ -1,13 +1,25 @@
 import Anthropic from '@anthropic-ai/sdk';
 
-const apiKey = process.env.ANTHROPIC_API_KEY;
+let cachedAnthropicClient: Anthropic | null = null;
 
-if (!apiKey) {
-  throw new Error('ANTHROPIC_API_KEY is not set in environment variables');
+export function getAnthropicClient() {
+  if (cachedAnthropicClient) return cachedAnthropicClient;
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY is not set in environment variables');
+  }
+
+  cachedAnthropicClient = new Anthropic({ apiKey });
+  return cachedAnthropicClient;
 }
 
-export const anthropic = new Anthropic({
-  apiKey,
+export const anthropic = new Proxy({} as Anthropic, {
+  get(_target, prop, receiver) {
+    const client = getAnthropicClient();
+    const value = Reflect.get(client, prop, receiver);
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
 });
 
 export interface ImageContent {

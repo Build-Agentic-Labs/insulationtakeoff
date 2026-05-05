@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
+import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -13,9 +14,7 @@ import {
   Plus,
   ChevronRight,
   FileText,
-  Building2,
   Loader2,
-  ArrowUpRight,
 } from 'lucide-react';
 
 interface Stats {
@@ -35,13 +34,6 @@ interface RecentProject {
   } | null;
 }
 
-interface RecentClient {
-  id: string;
-  name: string;
-  created_at: string;
-  project_count: number;
-}
-
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats>({
     totalClients: 0,
@@ -50,7 +42,6 @@ export default function DashboardPage() {
     pendingProjects: 0,
   });
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  const [recentClients, setRecentClients] = useState<RecentClient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -59,26 +50,31 @@ export default function DashboardPage() {
 
   const loadDashboardData = async () => {
     try {
+      const companyId = await getActiveCompanyId();
       // Get clients count
       const { count: clientsCount } = await supabase
         .from('clients')
-        .select('*', { count: 'exact', head: true });
+        .select('*', { count: 'exact', head: true })
+        .eq('company_id', companyId);
 
       // Get projects count
       const { count: projectsCount } = await supabase
         .from('projects')
-        .select('*', { count: 'exact', head: true });
+        .select('*', { count: 'exact', head: true })
+        .eq('company_id', companyId);
 
       // Get completed quotes count
       const { count: completedCount } = await supabase
         .from('projects')
         .select('*', { count: 'exact', head: true })
+        .eq('company_id', companyId)
         .eq('status', 'completed');
 
       // Get pending projects count
       const { count: pendingCount } = await supabase
         .from('projects')
         .select('*', { count: 'exact', head: true })
+        .eq('company_id', companyId)
         .neq('status', 'completed');
 
       setStats({
@@ -95,30 +91,11 @@ export default function DashboardPage() {
           id, name, status, created_at,
           client:clients(name)
         `)
+        .eq('company_id', companyId)
         .order('created_at', { ascending: false })
         .limit(5);
 
       setRecentProjects(projectsData || []);
-
-      // Get recent clients with project counts
-      const { data: clientsData } = await supabase
-        .from('clients')
-        .select('id, name, created_at')
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      if (clientsData) {
-        const clientsWithCounts = await Promise.all(
-          clientsData.map(async (client) => {
-            const { count } = await supabase
-              .from('projects')
-              .select('*', { count: 'exact', head: true })
-              .eq('client_id', client.id);
-            return { ...client, project_count: count || 0 };
-          })
-        );
-        setRecentClients(clientsWithCounts);
-      }
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
@@ -129,11 +106,11 @@ export default function DashboardPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
-        return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+        return 'ev-status-completed';
       case 'extracted':
-        return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+        return 'ev-status-extracted';
       default:
-        return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400';
+        return 'ev-status-default';
     }
   };
 
@@ -146,108 +123,124 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-white">Dashboard</h1>
-          <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-            Welcome back! Here's an overview of your business.
+    <div className="ev-page ev-page-grid min-h-screen">
+      <div className="ev-container">
+        {/* Header */}
+        <div className="mb-5">
+          <p className="ev-label">Operations</p>
+          <h1 className="ev-title mt-2 text-[42px]">Dashboard</h1>
+          <p className="ev-muted mt-2 text-sm">
+            Welcome back! Here&apos;s an overview of your business.
           </p>
         </div>
-        <Link href="/projects/new">
-          <Button className="gap-2">
-            <Plus className="h-4 w-4" />
-            New Project
-          </Button>
-        </Link>
-      </div>
 
-      {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
+        {/* Quick Actions */}
+        <Card className="ev-panel mb-6 rounded-[22px]">
+          <CardContent className="px-5 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">Total Clients</p>
-                <p className="text-3xl font-bold text-zinc-900 dark:text-white mt-1">
-                  {stats.totalClients}
+                <h3 className="text-base font-semibold text-[var(--takeoff-ink)]">
+                  Quick Actions
+                </h3>
+                <p className="ev-muted mt-0.5 text-xs">
+                  Add a client or start a project.
                 </p>
               </div>
-              <div className="h-12 w-12 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                <Users className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              <div className="flex flex-wrap gap-2">
+                <Link href="/clients/new">
+                  <Button variant="outline" className="h-9 gap-2 rounded-[12px] px-4">
+                    <Users className="h-4 w-4" />
+                    Add Client
+                  </Button>
+                </Link>
+                <Link href="/projects/new">
+                  <Button className="ev-primary-action h-9 gap-2 rounded-[12px] px-4">
+                    <Plus className="h-4 w-4" />
+                    New Project
+                  </Button>
+                </Link>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">Total Projects</p>
-                <p className="text-3xl font-bold text-zinc-900 dark:text-white mt-1">
-                  {stats.totalProjects}
-                </p>
+        {/* Stats Grid */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
+          <Card className="ev-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="ev-label">Total Clients</p>
+                  <p className="mt-2 text-3xl font-semibold text-[var(--takeoff-ink)]">
+                    {stats.totalClients}
+                  </p>
+                </div>
+                <div className="ev-icon-box h-12 w-12 rounded-[16px]">
+                  <Users className="h-6 w-6" />
+                </div>
               </div>
-              <div className="h-12 w-12 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                <FolderOpen className="h-6 w-6 text-purple-600 dark:text-purple-400" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">Completed Quotes</p>
-                <p className="text-3xl font-bold text-zinc-900 dark:text-white mt-1">
-                  {stats.completedQuotes}
-                </p>
+          <Card className="ev-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="ev-label">Total Projects</p>
+                  <p className="mt-2 text-3xl font-semibold text-[var(--takeoff-ink)]">
+                    {stats.totalProjects}
+                  </p>
+                </div>
+                <div className="ev-icon-box h-12 w-12 rounded-[16px]">
+                  <FolderOpen className="h-6 w-6 text-[#47644a]" />
+                </div>
               </div>
-              <div className="h-12 w-12 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                <FileCheck className="h-6 w-6 text-green-600 dark:text-green-400" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">In Progress</p>
-                <p className="text-3xl font-bold text-zinc-900 dark:text-white mt-1">
-                  {stats.pendingProjects}
-                </p>
+          <Card className="ev-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="ev-label">Completed Quotes</p>
+                  <p className="mt-2 text-3xl font-semibold text-[var(--takeoff-ink)]">
+                    {stats.completedQuotes}
+                  </p>
+                </div>
+                <div className="ev-icon-box h-12 w-12 rounded-[16px]">
+                  <FileCheck className="h-6 w-6 text-[#6f8b5e]" />
+                </div>
               </div>
-              <div className="h-12 w-12 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                <TrendingUp className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
 
-      {/* Recent Activity */}
-      <div className="grid lg:grid-cols-2 gap-6">
+          <Card className="ev-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="ev-label">In Progress</p>
+                  <p className="mt-2 text-3xl font-semibold text-[var(--takeoff-ink)]">
+                    {stats.pendingProjects}
+                  </p>
+                </div>
+                <div className="ev-icon-box h-12 w-12 rounded-[16px]">
+                  <TrendingUp className="h-6 w-6 text-[var(--takeoff-warning)]" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Recent Projects */}
-        <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-4">
+        <Card className="ev-card">
+          <CardHeader className="pb-4">
             <CardTitle className="text-lg">Recent Projects</CardTitle>
-            <Link href="/projects">
-              <Button variant="ghost" size="sm" className="gap-1 text-primary">
-                View all
-                <ArrowUpRight className="h-4 w-4" />
-              </Button>
-            </Link>
           </CardHeader>
           <CardContent>
             {recentProjects.length === 0 ? (
               <div className="text-center py-8">
-                <FolderOpen className="h-10 w-10 mx-auto text-zinc-300 dark:text-zinc-600 mb-3" />
-                <p className="text-zinc-500 dark:text-zinc-400 text-sm">No projects yet</p>
+                <FolderOpen className="mx-auto mb-3 h-10 w-10 text-[var(--takeoff-text-subtle)]" />
+                <p className="ev-muted text-sm">No projects yet</p>
                 <Link href="/projects/new">
                   <Button size="sm" className="mt-3">
                     <Plus className="h-4 w-4 mr-2" />
@@ -261,79 +254,27 @@ export default function DashboardPage() {
                   <Link
                     key={project.id}
                     href={`/projects/${project.id}`}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors group"
+                    className="group flex items-center justify-between rounded-[18px] p-3 transition-colors hover:bg-[var(--takeoff-paper)]"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                        <FileText className="h-5 w-5 text-red-600 dark:text-red-400" />
+                      <div className="ev-icon-box h-10 w-10 rounded-[14px]">
+                        <FileText className="h-5 w-5 text-[var(--takeoff-accent)]" />
                       </div>
                       <div>
-                        <p className="font-medium text-zinc-900 dark:text-white group-hover:text-primary transition-colors">
+                        <p className="font-medium text-[var(--takeoff-ink)] transition-colors group-hover:text-[var(--takeoff-accent)]">
                           {project.name}
                         </p>
-                        <p className="text-xs text-zinc-500">
+                        <p className="text-xs text-[var(--takeoff-text-muted)]">
                           {project.client?.name || 'No client'} • {new Date(project.created_at).toLocaleDateString()}
                         </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${getStatusColor(project.status)}`}>
+                      <span className={`ev-status ${getStatusColor(project.status)}`}>
                         {project.status}
                       </span>
-                      <ChevronRight className="h-4 w-4 text-zinc-300 group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                      <ChevronRight className="h-4 w-4 text-[var(--takeoff-text-subtle)] transition-all group-hover:translate-x-1 group-hover:text-[var(--takeoff-accent)]" />
                     </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Clients */}
-        <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-4">
-            <CardTitle className="text-lg">Recent Clients</CardTitle>
-            <Link href="/clients">
-              <Button variant="ghost" size="sm" className="gap-1 text-primary">
-                View all
-                <ArrowUpRight className="h-4 w-4" />
-              </Button>
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {recentClients.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="h-10 w-10 mx-auto text-zinc-300 dark:text-zinc-600 mb-3" />
-                <p className="text-zinc-500 dark:text-zinc-400 text-sm">No clients yet</p>
-                <Link href="/clients/new">
-                  <Button size="sm" className="mt-3">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Client
-                  </Button>
-                </Link>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {recentClients.map((client) => (
-                  <Link
-                    key={client.id}
-                    href={`/clients/${client.id}`}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <Building2 className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-zinc-900 dark:text-white group-hover:text-primary transition-colors">
-                          {client.name}
-                        </p>
-                        <p className="text-xs text-zinc-500">
-                          {client.project_count} {client.project_count === 1 ? 'project' : 'projects'}
-                        </p>
-                      </div>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-zinc-300 group-hover:text-primary group-hover:translate-x-1 transition-all" />
                   </Link>
                 ))}
               </div>
@@ -341,36 +282,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Quick Actions */}
-      <Card className="mt-6 border-zinc-200 dark:border-zinc-700 shadow-sm bg-gradient-to-r from-zinc-50 to-white dark:from-zinc-800 dark:to-zinc-900">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">
-                Quick Actions
-              </h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                Get started with common tasks
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <Link href="/clients/new">
-                <Button variant="outline" className="gap-2">
-                  <Users className="h-4 w-4" />
-                  Add Client
-                </Button>
-              </Link>
-              <Link href="/projects/new">
-                <Button className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  New Project
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

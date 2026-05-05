@@ -1,13 +1,22 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Space_Grotesk, Space_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
 
-const inter = Inter({ subsets: ["latin"] });
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-space-grotesk",
+});
+
+const spaceMono = Space_Mono({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-space-mono",
+});
 
 export const metadata: Metadata = {
-  title: "EV Insulation - AI-Powered Insulation Quotes",
-  description: "AI-powered insulation quote generator from architectural PDFs",
+  title: "Insulation Takeoff & Quote Workspace",
+  description: "Construction takeoff and insulation quote workspace for insulation contractors",
 };
 
 export default function RootLayout({
@@ -17,10 +26,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>
-        <div className="min-h-screen flex">
+      <body className={`${spaceGrotesk.variable} ${spaceMono.variable}`}>
+        <div className="flex min-h-screen bg-[var(--takeoff-paper)]">
           <Sidebar />
-          <main className="flex-1 ml-64 transition-all duration-300 bg-zinc-50 dark:bg-zinc-900 min-h-screen">
+          <main className="min-h-screen min-w-0 flex-1 bg-[var(--takeoff-paper)] transition-all duration-300">
             {children}
           </main>
         </div>

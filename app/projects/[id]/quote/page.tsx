@@ -1,21 +1,33 @@
 "use client";
 
-import { use, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { use, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
+import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { formatCurrency, formatSqft } from '@/lib/calculations/pricing';
-import { FileText, Download, Mail, Loader2, AlertCircle, Settings, Plus, Trash2, Check, Layers } from 'lucide-react';
-import { DemoInstructions } from '@/components/demo/DemoInstructions';
-import { DemoTooltip } from '@/components/demo/DemoTooltip';
+import { formatCurrency } from '@/lib/calculations/pricing';
+import { AlertCircle, ArrowLeft, Download, FileText, Loader2, Mail, Plus, Trash2 } from 'lucide-react';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 import { resolveActiveMode } from '@/lib/extraction/resolveActiveMode';
-
-// ─── Interfaces ─────────────────────────────────────────────
+import {
+  ESTIMATE_GROUP_SECTION_TITLE,
+  calculateQuoteTotals,
+  normalizeQuoteLineItems,
+  parseRValueNumber,
+  roundEstimateValue,
+  sanitizeEstimateRows,
+  type EstimateGroup,
+  type EstimateUnit,
+  type EstimateWorksheetRow,
+  type QuoteLineItem,
+} from '@/lib/quotes/estimate';
+import {
+  buildSuggestedAreasFromWorkspaceSummary,
+  getPreferredWorkspaceSummary,
+  mapTakeoffSessionRowToSession,
+  type TakeoffSessionRowLike,
+} from '@/lib/takeoff/workspace-v2';
 
 interface Room {
   id: string;
@@ -26,15 +38,26 @@ interface Room {
   height_ft: number | null;
 }
 
-interface InsulationProduct {
+interface ProjectRecord {
   id: string;
   name: string;
-  type: 'batt' | 'blown_in';
-  rValue: number;
-  pricePerSqft: number;
-  thickness: string;
-  description: string;
-  applicableAreas: string[];
+  active_extraction_mode?: 'ocr' | 'vision' | null;
+}
+
+interface ExtractionRunRecord {
+  id: string;
+  mode: 'ocr' | 'vision' | 'hybrid' | null;
+  status: string | null;
+  finished_at: string | null;
+  takeoff_envelope?: unknown;
+}
+
+interface QuoteRecord {
+  id: string;
+  pdf_url: string | null;
+  download_url?: string | null;
+  line_items: QuoteLineItem[] | null;
+  total_cost?: number | null;
 }
 
 interface InsulationArea {
@@ -44,97 +67,12 @@ interface InsulationArea {
   enabled: boolean;
   rValue: number | null;
   sqft: number;
+  unit: EstimateUnit;
   pricePerSqft: number;
   isCustom?: boolean;
-  selectedProductId?: string | null;
+  group: EstimateGroup;
+  spec?: string | null;
 }
-
-// ─── Product Catalog ────────────────────────────────────────
-
-const INSULATION_CATALOG: InsulationProduct[] = [
-  // Batt products
-  {
-    id: 'batt-r13',
-    name: 'R-13 Batt',
-    type: 'batt',
-    rValue: 13,
-    pricePerSqft: 0.90,
-    thickness: '3.5"',
-    description: 'Fiberglass batt for 2×4 walls',
-    applicableAreas: ['exterior_walls', 'garage_walls'],
-  },
-  {
-    id: 'batt-r15',
-    name: 'R-15 Batt',
-    type: 'batt',
-    rValue: 15,
-    pricePerSqft: 1.10,
-    thickness: '3.5"',
-    description: 'Mineral wool batt for 2×4 walls',
-    applicableAreas: ['exterior_walls', 'garage_walls'],
-  },
-  {
-    id: 'batt-r19',
-    name: 'R-19 Batt',
-    type: 'batt',
-    rValue: 19,
-    pricePerSqft: 1.30,
-    thickness: '6.25"',
-    description: 'Fiberglass batt for 2×6 walls & floors',
-    applicableAreas: ['exterior_walls', 'garage_walls', 'crawlspace_floor'],
-  },
-  {
-    id: 'batt-r21',
-    name: 'R-21 Batt',
-    type: 'batt',
-    rValue: 21,
-    pricePerSqft: 1.50,
-    thickness: '5.5"',
-    description: 'High-density batt for 2×6 walls',
-    applicableAreas: ['exterior_walls', 'garage_walls'],
-  },
-  // Blown-in products
-  {
-    id: 'blown-r30',
-    name: 'R-30 Blown-In',
-    type: 'blown_in',
-    rValue: 30,
-    pricePerSqft: 1.25,
-    thickness: '10–11"',
-    description: 'Blown fiberglass/cellulose for attics',
-    applicableAreas: ['attic_ceiling', 'crawlspace_floor'],
-  },
-  {
-    id: 'blown-r38',
-    name: 'R-38 Blown-In',
-    type: 'blown_in',
-    rValue: 38,
-    pricePerSqft: 1.50,
-    thickness: '13–14"',
-    description: 'Blown fiberglass/cellulose for attics',
-    applicableAreas: ['attic_ceiling'],
-  },
-  {
-    id: 'blown-r49',
-    name: 'R-49 Blown-In',
-    type: 'blown_in',
-    rValue: 49,
-    pricePerSqft: 1.85,
-    thickness: '17–18"',
-    description: 'Blown insulation for cold climate attics',
-    applicableAreas: ['attic_ceiling'],
-  },
-  {
-    id: 'blown-r60',
-    name: 'R-60 Blown-In',
-    type: 'blown_in',
-    rValue: 60,
-    pricePerSqft: 2.20,
-    thickness: '20–22"',
-    description: 'Maximum attic coverage',
-    applicableAreas: ['attic_ceiling'],
-  },
-];
 
 interface GlobalPricing {
   wall_per_sqft: number;
@@ -143,144 +81,227 @@ interface GlobalPricing {
   floor_per_sqft: number;
 }
 
+type EstimateSectionKey = 'walls' | 'ceilings' | 'floors' | 'specialty' | 'custom';
+
 const DEFAULT_PRICING: GlobalPricing = {
-  wall_per_sqft: 1.50,
+  wall_per_sqft: 1.5,
   attic_per_sqft: 1.25,
   garage_wall_per_sqft: 1.75,
-  floor_per_sqft: 2.00,
+  floor_per_sqft: 2.0,
 };
+
+const ESTIMATE_SECTIONS: Array<{
+  key: EstimateSectionKey;
+  code: string;
+  title: string;
+  description: string;
+}> = [
+  {
+    key: 'walls',
+    code: '01',
+    title: 'Wall Assemblies',
+    description: 'Exterior, garage, basement, and knee-wall insulation scope.',
+  },
+  {
+    key: 'ceilings',
+    code: '02',
+    title: 'Ceilings & Attics',
+    description: 'Attic and ceiling insulation taken from traced scope.',
+  },
+  {
+    key: 'floors',
+    code: '03',
+    title: 'Floors & Crawlspaces',
+    description: 'Floor-area and crawlspace scope taken from traced zones.',
+  },
+  {
+    key: 'specialty',
+    code: '04',
+    title: 'Specialty Scope',
+    description: 'Rim joists and non-standard scope items.',
+  },
+  {
+    key: 'custom',
+    code: '05',
+    title: 'Manual Additions',
+    description: 'Estimator-added rows that are not seeded directly from takeoff.',
+  },
+];
+
+const SECTION_BY_AREA_ID: Record<string, EstimateSectionKey> = {
+  exterior_walls: 'walls',
+  garage_walls: 'walls',
+  basement_walls: 'walls',
+  knee_walls: 'walls',
+  attic_ceiling: 'ceilings',
+  cathedral_ceiling: 'ceilings',
+  garage_ceiling: 'ceilings',
+  crawlspace_floor: 'floors',
+  floor_insulation: 'floors',
+  sound_floor: 'floors',
+  cantilever_floor: 'floors',
+  rim_joist: 'specialty',
+};
+
+const SECTION_KEY_BY_GROUP: Record<EstimateGroup, EstimateSectionKey> = {
+  Walls: 'walls',
+  Ceilings: 'ceilings',
+  Floors: 'floors',
+  Specialty: 'specialty',
+  Custom: 'custom',
+};
+
+const GROUP_BY_SECTION_KEY: Record<EstimateSectionKey, EstimateGroup> = {
+  walls: 'Walls',
+  ceilings: 'Ceilings',
+  floors: 'Floors',
+  specialty: 'Specialty',
+  custom: 'Custom',
+};
+
+function formatEditableNumber(value: number, precision: number = 2): string {
+  const rounded = roundEstimateValue(value, precision);
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+function formatLineDescriptor(area: InsulationArea): string | null {
+  const parts: string[] = [];
+  const spec = area.spec?.trim();
+  if (spec) {
+    parts.push(spec);
+  }
+  if (area.rValue !== null && area.rValue > 0) {
+    const rValue = `R-${area.rValue}`;
+    if (!parts.some((part) => part.toLowerCase().includes(rValue.toLowerCase()))) {
+      parts.push(rValue);
+    }
+  }
+  const cleanedDescription = area.description?.trim();
+  if (
+    cleanedDescription &&
+    cleanedDescription.toLowerCase() !== 'custom line item' &&
+    !parts.includes(cleanedDescription)
+  ) {
+    parts.push(cleanedDescription);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function getSectionForArea(area: InsulationArea) {
+  const key: EstimateSectionKey = area.group
+    ? SECTION_KEY_BY_GROUP[area.group]
+    : area.isCustom
+    ? 'custom'
+    : SECTION_BY_AREA_ID[area.id] ?? 'specialty';
+  return ESTIMATE_SECTIONS.find((section) => section.key === key)!;
+}
+
+function getDefaultPriceForGroup(group: EstimateGroup, pricing: GlobalPricing): number {
+  switch (group) {
+    case 'Ceilings':
+      return pricing.attic_per_sqft;
+    case 'Floors':
+    case 'Specialty':
+      return pricing.floor_per_sqft;
+    case 'Walls':
+      return pricing.wall_per_sqft;
+    case 'Custom':
+    default:
+      return 0;
+  }
+}
+
+function estimateRowsToInsulationAreas(
+  estimateRows: EstimateWorksheetRow[],
+  pricing: GlobalPricing,
+): InsulationArea[] {
+  return estimateRows.map((row) => ({
+    id: row.id,
+    name: row.label,
+    description: row.note || ESTIMATE_GROUP_SECTION_TITLE[row.group],
+    enabled: row.enabled,
+    rValue: parseRValueNumber(row.spec),
+    sqft: roundEstimateValue(row.quantity, 1),
+    unit: row.unit,
+    pricePerSqft: roundEstimateValue(getDefaultPriceForGroup(row.group, pricing)),
+    isCustom: row.source === 'manual',
+    group: row.group,
+    spec: row.spec || null,
+  }));
+}
+
+function quoteLineItemsToInsulationAreas(lineItems: unknown): InsulationArea[] {
+  return normalizeQuoteLineItems(lineItems).map((item) => {
+    const sectionKey =
+      ESTIMATE_SECTIONS.find((section) => section.title === item.section)?.key ?? 'custom';
+    const group = GROUP_BY_SECTION_KEY[sectionKey];
+
+    return {
+      id: item.id,
+      name: item.area,
+      description: item.notes || 'Generated quote line item',
+      enabled: true,
+      rValue: item.rValue,
+      sqft: roundEstimateValue(item.quantity, 1),
+      unit: item.unit,
+      pricePerSqft: roundEstimateValue(item.pricePerUnit),
+      isCustom: item.isCustom,
+      group,
+      spec: item.spec ?? null,
+    };
+  });
+}
 
 export default function QuotePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
-  const [project, setProject] = useState<any>(null);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [globalPricing, setGlobalPricing] = useState<GlobalPricing>(DEFAULT_PRICING);
-  const [quote, setQuote] = useState<any>(null);
+  const [project, setProject] = useState<ProjectRecord | null>(null);
+  const [quote, setQuote] = useState<QuoteRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Per-project insulation areas configuration
   const [insulationAreas, setInsulationAreas] = useState<InsulationArea[]>([]);
-  const [envelope, setEnvelope] = useState<TakeoffEnvelopeV1 | null>(null);
+  const [taxAmount, setTaxAmount] = useState(0);
+  const [terms, setTerms] = useState(
+    'Final field measurements will be verified before installation. Pricing includes labor and standard insulation materials unless noted otherwise.'
+  );
 
-  useEffect(() => {
-    loadData();
-  }, [id]);
-
-  const loadData = async () => {
-    try {
-      // Load project
-      const { data: projectData } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      setProject(projectData);
-
-      // Load rooms
-      const { data: roomsData } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('project_id', id);
-
-      const loadedRooms = roomsData || [];
-      setRooms(loadedRooms);
-
-      // Load global pricing settings
-      const { data: pricingData } = await supabase
-        .from('settings')
-        .select('value')
-        .eq('key', 'pricing')
-        .single();
-
-      const pricing = (pricingData?.value || DEFAULT_PRICING) as GlobalPricing;
-      setGlobalPricing(pricing);
-
-      // Load extraction_runs with envelope data
-      const { data: runsData } = await supabase
-        .from('extraction_runs')
-        .select('id, mode, status, finished_at, takeoff_envelope')
-        .eq('project_id', id)
-        .order('finished_at', { ascending: false });
-
-      // Check documents for legacy envelope
-      const { data: docsData } = await supabase
-        .from('documents')
-        .select('takeoff_envelope')
-        .eq('project_id', id)
-        .not('takeoff_envelope', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const hasDocEnvelope = !!docsData?.[0]?.takeoff_envelope;
-      const runsTyped = (runsData || []) as any[];
-
-      const resolution = resolveActiveMode({
-        persistedMode: (projectData?.active_extraction_mode as 'ocr' | 'vision' | null) || null,
-        runs: runsTyped.map((r: any) => ({
-          id: r.id, mode: r.mode, status: r.status, finished_at: r.finished_at,
-        })),
-        hasEnvelope: hasDocEnvelope || runsTyped.some((r: any) => (r.mode === 'ocr' || r.mode === 'hybrid') && r.takeoff_envelope),
-        hasRooms: loadedRooms.length > 0,
-      });
-
-      // Run-tied envelope: prefer envelope from the specific activeRun
-      let loadedEnvelope: TakeoffEnvelopeV1 | null = null;
-      if (resolution.mode === 'ocr' && resolution.activeRun) {
-        const activeRunData = runsTyped.find((r: any) => r.id === resolution.activeRun!.id);
-        if (activeRunData?.takeoff_envelope) {
-          loadedEnvelope = activeRunData.takeoff_envelope as unknown as TakeoffEnvelopeV1;
-        }
-      }
-      // Fallback: documents.takeoff_envelope (legacy/backfill)
-      if (!loadedEnvelope && resolution.mode === 'ocr' && hasDocEnvelope) {
-        loadedEnvelope = docsData![0].takeoff_envelope as unknown as TakeoffEnvelopeV1;
-      }
-      if (loadedEnvelope) {
-        setEnvelope(loadedEnvelope);
-      }
-
-      // Only pass envelope to quote when OCR is the active mode
-      initializeInsulationAreas(
-        loadedRooms,
-        pricing,
-        resolution.mode === 'ocr' ? loadedEnvelope : null,
-      );
-
-      // Load existing quote
-      const { data: quoteData } = await supabase
-        .from('quotes')
-        .select('*')
-        .eq('project_id', id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (quoteData) {
-        setQuote(quoteData);
-        // Restore configuration from existing quote
-        if (quoteData.line_items && Array.isArray(quoteData.line_items)) {
-          restoreFromQuote(quoteData.line_items, loadedRooms, pricing);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setIsLoading(false);
+  const initializeInsulationAreas = useCallback((
+    loadedRooms: Room[],
+    pricing: GlobalPricing,
+    sources?: {
+      workspaceSummary?: ReturnType<typeof getPreferredWorkspaceSummary>;
+      envelope?: TakeoffEnvelopeV1 | null;
     }
-  };
-
-  const initializeInsulationAreas = (loadedRooms: Room[], pricing: GlobalPricing, env?: TakeoffEnvelopeV1 | null) => {
+  ) => {
     const areas: InsulationArea[] = [];
+    const envelope = sources?.envelope ?? null;
 
-    // Calculate living area totals
-    const livingRooms = loadedRooms.filter((r) => r.type === 'living');
-    const totalLivingArea = livingRooms.reduce((sum, r) => sum + (r.area_sqft || 0), 0);
+    const addArea = (
+      area: Omit<InsulationArea, 'unit' | 'group'> & Partial<Pick<InsulationArea, 'unit' | 'group'>>,
+    ) => {
+      if (!areas.some((existing) => existing.id === area.id)) {
+        const sectionKey = SECTION_BY_AREA_ID[area.id] ?? 'custom';
+        areas.push({
+          ...area,
+          sqft: roundEstimateValue(area.sqft),
+          pricePerSqft: roundEstimateValue(area.pricePerSqft),
+          unit: area.unit ?? 'SF',
+          group: area.group ?? GROUP_BY_SECTION_KEY[sectionKey],
+        });
+      }
+    };
 
-    // Calculate wall area if we have perimeter data
+    for (const area of buildSuggestedAreasFromWorkspaceSummary(sources?.workspaceSummary, pricing)) {
+      addArea({
+        ...area,
+        rValue: null,
+        unit: area.unit,
+      });
+    }
+
+    const livingRooms = loadedRooms.filter((room) => room.type === 'living');
+    const totalLivingArea = livingRooms.reduce((sum, room) => sum + (room.area_sqft || 0), 0);
+
     let livingWallArea = 0;
     for (const room of livingRooms) {
       if (room.perimeter_ft && room.height_ft) {
@@ -288,19 +309,21 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       }
     }
 
-    // Attic/Ceiling - prefer envelope, then attic rooms, then living area
-    const envCeiling = env?.summary?.estimated_ceiling_sf || 0;
-    const ceilingStatus = env?.completeness?.ceiling_area || 'missing';
-    const atticRooms = loadedRooms.filter((r) => r.type === 'attic');
-    const totalAtticArea = atticRooms.reduce((sum, r) => sum + (r.area_sqft || 0), 0);
-    const ceilingArea = envCeiling > 0 ? envCeiling : (totalAtticArea > 0 ? totalAtticArea : totalLivingArea);
-    const ceilingSource = envCeiling > 0 ? ` (pdfengine · ${ceilingStatus})` : '';
+    const envCeiling = envelope?.summary?.estimated_ceiling_sf || 0;
+    const ceilingStatus = envelope?.completeness?.ceiling_area || 'missing';
+    const atticRooms = loadedRooms.filter((room) => room.type === 'attic');
+    const totalAtticArea = atticRooms.reduce((sum, room) => sum + (room.area_sqft || 0), 0);
+    const ceilingArea =
+      envCeiling > 0 ? envCeiling : totalAtticArea > 0 ? totalAtticArea : totalLivingArea;
 
     if (ceilingArea > 0) {
-      areas.push({
+      addArea({
         id: 'attic_ceiling',
-        name: `Attic/Ceiling Insulation${ceilingSource}`,
-        description: `${formatSqft(ceilingArea)} sq ft of ceiling area`,
+        name: envCeiling > 0 ? 'Attic / Ceiling Insulation' : 'Attic / Ceiling Insulation',
+        description:
+          envCeiling > 0
+            ? `${Math.round(ceilingArea).toLocaleString()} SF from takeoff extraction (${ceilingStatus})`
+            : `${Math.round(ceilingArea).toLocaleString()} SF of ceiling area`,
         enabled: envCeiling > 0 ? ceilingStatus !== 'missing' : true,
         rValue: null,
         sqft: ceilingArea,
@@ -308,48 +331,45 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       });
     }
 
-    // Exterior Walls — prefer OCR envelope net_sf, then rooms, then estimate
-    const envNetWallSF = env?.summary?.net_sf || 0;
-    const envGrossWallSF = env?.summary?.gross_sf || 0;
-    const wallStatus = env?.completeness?.net_sf || 'missing';
+    const envNetWallSF = envelope?.summary?.net_sf || 0;
+    const envGrossWallSF = envelope?.summary?.gross_sf || 0;
+    const wallStatus = envelope?.completeness?.net_sf || 'missing';
     if (envNetWallSF > 0) {
-      areas.push({
+      addArea({
         id: 'exterior_walls',
-        name: `Exterior Walls (pdfengine${wallStatus === 'estimated' ? ' · estimated' : ''})`,
-        description: `${formatSqft(envNetWallSF)} net sf (${formatSqft(envGrossWallSF)} gross − openings)`,
-        enabled: wallStatus === 'final',  // Only auto-enable if completeness is final
+        name: 'Exterior Walls',
+        description: `${Math.round(envNetWallSF).toLocaleString()} SF net (${Math.round(
+          envGrossWallSF
+        ).toLocaleString()} gross less openings)`,
+        enabled: wallStatus === 'final',
         rValue: null,
         sqft: envNetWallSF,
         pricePerSqft: pricing.wall_per_sqft,
       });
     } else if (livingWallArea > 0) {
-      areas.push({
+      addArea({
         id: 'exterior_walls',
         name: 'Exterior Walls',
-        description: `${formatSqft(livingWallArea)} sq ft of wall area`,
+        description: `${Math.round(livingWallArea).toLocaleString()} SF of wall area`,
         enabled: true,
         rValue: null,
         sqft: livingWallArea,
         pricePerSqft: pricing.wall_per_sqft,
       });
     } else if (totalLivingArea > 0) {
-      // Estimate wall area: assume 9ft ceiling and sqrt(area)*4 for perimeter
-      const estimatedPerimeter = Math.sqrt(totalLivingArea) * 4;
-      const estimatedWallArea = estimatedPerimeter * 9;
-      areas.push({
+      addArea({
         id: 'exterior_walls',
-        name: 'Exterior Walls (Estimated)',
-        description: `~${formatSqft(Math.round(estimatedWallArea))} sq ft estimated wall area`,
+        name: 'Exterior Walls',
+        description: 'Wall quantity not seeded because no verified wall height was found.',
         enabled: false,
         rValue: null,
-        sqft: Math.round(estimatedWallArea),
+        sqft: 0,
         pricePerSqft: pricing.wall_per_sqft,
       });
     }
 
-    // Garage Walls
-    const garageRooms = loadedRooms.filter((r) => r.type === 'garage');
-    const totalGarageArea = garageRooms.reduce((sum, r) => sum + (r.area_sqft || 0), 0);
+    const garageRooms = loadedRooms.filter((room) => room.type === 'garage');
+    const totalGarageArea = garageRooms.reduce((sum, room) => sum + (room.area_sqft || 0), 0);
 
     let garageWallArea = 0;
     for (const room of garageRooms) {
@@ -359,61 +379,57 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
     }
 
     if (garageWallArea > 0) {
-      areas.push({
+      addArea({
         id: 'garage_walls',
         name: 'Garage Walls',
-        description: `${formatSqft(garageWallArea)} sq ft of garage wall area`,
+        description: `${Math.round(garageWallArea).toLocaleString()} SF of garage wall area`,
         enabled: false,
         rValue: null,
         sqft: garageWallArea,
         pricePerSqft: pricing.garage_wall_per_sqft,
       });
     } else if (totalGarageArea > 0) {
-      // Estimate: assume 10ft ceiling and sqrt(area)*4 for perimeter
-      const estimatedPerimeter = Math.sqrt(totalGarageArea) * 4;
-      const estimatedWallArea = estimatedPerimeter * 10;
-      areas.push({
+      addArea({
         id: 'garage_walls',
-        name: 'Garage Walls (Estimated)',
-        description: `~${formatSqft(Math.round(estimatedWallArea))} sq ft estimated`,
+        name: 'Garage Walls',
+        description: 'Garage wall quantity not seeded because no verified wall height was found.',
         enabled: false,
         rValue: null,
-        sqft: Math.round(estimatedWallArea),
+        sqft: 0,
         pricePerSqft: pricing.garage_wall_per_sqft,
       });
     }
 
-    // Crawlspace/Floor - prefer envelope, then crawlspace rooms, then living area
-    const envCrawlspace = env?.summary?.estimated_crawlspace_sf || 0;
-    const crawlspaceStatus = env?.completeness?.crawlspace_area || 'missing';
-    const crawlspaceRooms = loadedRooms.filter((r) => r.type === 'crawlspace');
-    const totalCrawlspaceArea = crawlspaceRooms.reduce((sum, r) => sum + (r.area_sqft || 0), 0);
+    const envCrawlspace = envelope?.summary?.estimated_crawlspace_sf || 0;
+    const crawlspaceStatus = envelope?.completeness?.crawlspace_area || 'missing';
+    const crawlspaceRooms = loadedRooms.filter((room) => room.type === 'crawlspace');
+    const totalCrawlspaceArea = crawlspaceRooms.reduce((sum, room) => sum + (room.area_sqft || 0), 0);
 
     if (envCrawlspace > 0) {
-      areas.push({
+      addArea({
         id: 'crawlspace_floor',
-        name: `Crawlspace/Floor Insulation (pdfengine · ${crawlspaceStatus})`,
-        description: `${formatSqft(envCrawlspace)} sq ft from OCR pipeline`,
+        name: 'Crawlspace / Floor Insulation',
+        description: `${Math.round(envCrawlspace).toLocaleString()} SF from takeoff extraction (${crawlspaceStatus})`,
         enabled: crawlspaceStatus !== 'missing',
         rValue: null,
         sqft: envCrawlspace,
         pricePerSqft: pricing.floor_per_sqft,
       });
     } else if (totalCrawlspaceArea > 0) {
-      areas.push({
+      addArea({
         id: 'crawlspace_floor',
-        name: 'Crawlspace/Floor Insulation',
-        description: `${formatSqft(totalCrawlspaceArea)} sq ft of floor area`,
+        name: 'Crawlspace / Floor Insulation',
+        description: `${Math.round(totalCrawlspaceArea).toLocaleString()} SF of floor area`,
         enabled: false,
         rValue: null,
         sqft: totalCrawlspaceArea,
         pricePerSqft: pricing.floor_per_sqft,
       });
     } else if (totalLivingArea > 0) {
-      areas.push({
+      addArea({
         id: 'crawlspace_floor',
         name: 'Floor Insulation',
-        description: `${formatSqft(totalLivingArea)} sq ft (based on living area)`,
+        description: `${Math.round(totalLivingArea).toLocaleString()} SF based on living area`,
         enabled: false,
         rValue: null,
         sqft: totalLivingArea,
@@ -421,13 +437,12 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       });
     }
 
-    // Garage Ceiling — from envelope only (not available from rooms)
-    const envGarageCeiling = env?.summary?.estimated_garage_ceiling_sf || 0;
+    const envGarageCeiling = envelope?.summary?.estimated_garage_ceiling_sf || 0;
     if (envGarageCeiling > 0) {
-      areas.push({
+      addArea({
         id: 'garage_ceiling',
-        name: 'Garage Ceiling Insulation (pdfengine)',
-        description: `${formatSqft(envGarageCeiling)} sq ft from OCR pipeline`,
+        name: 'Garage Ceiling Insulation',
+        description: `${Math.round(envGarageCeiling).toLocaleString()} SF from takeoff extraction`,
         enabled: false,
         rValue: null,
         sqft: envGarageCeiling,
@@ -435,131 +450,193 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       });
     }
 
-    // Rim Joist — from envelope only
-    const envRimJoist = env?.summary?.estimated_rim_joist_lf || 0;
+    const envRimJoist = envelope?.summary?.estimated_rim_joist_lf || 0;
     if (envRimJoist > 0) {
-      // Rim joist is LF × ~1ft height = SF for insulation purposes
-      const rimJoistSf = Math.round(envRimJoist);
-      areas.push({
+      addArea({
         id: 'rim_joist',
-        name: 'Rim Joist Insulation (pdfengine)',
-        description: `${Math.round(envRimJoist)} LF from OCR pipeline`,
+        name: 'Rim Joist Insulation',
+        description: `${Math.round(envRimJoist).toLocaleString()} LF from takeoff extraction`,
         enabled: false,
         rValue: null,
-        sqft: rimJoistSf,
+        sqft: envRimJoist,
+        unit: 'LF',
         pricePerSqft: pricing.floor_per_sqft,
       });
     }
 
     setInsulationAreas(areas);
-  };
+  }, []);
 
-  const restoreFromQuote = (lineItems: any[], loadedRooms: Room[], pricing: GlobalPricing) => {
-    // First initialize with current room data
-    initializeInsulationAreas(loadedRooms, pricing);
+  const restoreFromQuote = useCallback((lineItems: unknown) => {
+    setInsulationAreas(quoteLineItemsToInsulationAreas(lineItems));
+  }, []);
 
-    // Then update with saved quote values
-    setInsulationAreas(prev => {
-      const updatedAreas = prev.map(area => {
-        const savedItem = lineItems.find((item: any) => item.id === area.id);
-        if (savedItem) {
-          // Try to match a product by R-value and price
-          const matchedProduct = INSULATION_CATALOG.find(
-            p => p.applicableAreas.includes(area.id) &&
-                 p.rValue === savedItem.rValue &&
-                 p.pricePerSqft === savedItem.pricePerSqft
-          );
-          return {
-            ...area,
-            enabled: true,
-            rValue: savedItem.rValue,
-            sqft: savedItem.sqft || area.sqft,
-            pricePerSqft: savedItem.pricePerSqft ?? area.pricePerSqft,
-            selectedProductId: savedItem.selectedProductId || matchedProduct?.id || null,
-          };
-        }
-        return area;
+  const loadData = useCallback(async () => {
+    try {
+      const companyId = await getActiveCompanyId();
+      const { data: projectData } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', id)
+        .eq('company_id', companyId)
+        .single();
+
+      setProject((projectData as ProjectRecord | null) ?? null);
+
+      const { data: roomsData } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('project_id', id)
+        .eq('company_id', companyId);
+
+      const loadedRooms = roomsData || [];
+
+      const { data: pricingData } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'pricing')
+        .eq('company_id', companyId)
+        .single();
+
+      const pricing = (pricingData?.value || DEFAULT_PRICING) as GlobalPricing;
+
+      const { data: takeoffSessionData } = await supabase
+        .from('takeoff_sessions')
+        .select('*')
+        .eq('project_id', id)
+        .eq('company_id', companyId)
+        .in('status', ['in_progress', 'calibrating', 'tracing', 'reviewing', 'completed'])
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const takeoffSession = takeoffSessionData
+        ? mapTakeoffSessionRowToSession(takeoffSessionData as TakeoffSessionRowLike)
+        : null;
+      const workspaceSummary = getPreferredWorkspaceSummary(takeoffSession);
+      const estimateRows = sanitizeEstimateRows(takeoffSession?.estimateRows);
+
+      const { data: runsData } = await supabase
+        .from('extraction_runs')
+        .select('id, mode, status, finished_at, takeoff_envelope')
+        .eq('project_id', id)
+        .eq('company_id', companyId)
+        .order('finished_at', { ascending: false });
+
+      const { data: docsData } = await supabase
+        .from('documents')
+        .select('takeoff_envelope')
+        .eq('project_id', id)
+        .eq('company_id', companyId)
+        .not('takeoff_envelope', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const hasDocEnvelope = !!docsData?.[0]?.takeoff_envelope;
+      const runsTyped = (runsData || []) as ExtractionRunRecord[];
+
+      const resolution = resolveActiveMode({
+        persistedMode: (projectData as ProjectRecord | null)?.active_extraction_mode || null,
+        runs: runsTyped.flatMap((run) =>
+          run.mode
+            ? [
+                {
+                  id: run.id,
+                  mode: run.mode,
+                  status: run.status ?? '',
+                  finished_at: run.finished_at,
+                },
+              ]
+            : []
+        ),
+        hasEnvelope:
+          hasDocEnvelope ||
+          runsTyped.some((run) => (run.mode === 'ocr' || run.mode === 'hybrid') && run.takeoff_envelope),
+        hasRooms: loadedRooms.length > 0,
       });
 
-      // Add any custom items from the saved quote
-      const customItems = lineItems.filter((item: any) => item.isCustom);
-      const customAreas: InsulationArea[] = customItems.map((item: any) => ({
-        id: item.id,
-        name: item.area || item.name,
-        description: 'Custom line item',
-        enabled: true,
-        rValue: item.rValue,
-        sqft: item.sqft,
-        pricePerSqft: item.pricePerSqft,
-        isCustom: true,
-      }));
+      let loadedEnvelope: TakeoffEnvelopeV1 | null = null;
+      if (resolution.mode === 'ocr' && resolution.activeRun) {
+        const activeRunData = runsTyped.find((run) => run.id === resolution.activeRun!.id);
+        if (activeRunData?.takeoff_envelope) {
+          loadedEnvelope = activeRunData.takeoff_envelope as unknown as TakeoffEnvelopeV1;
+        }
+      }
+      if (!loadedEnvelope && resolution.mode === 'ocr' && hasDocEnvelope) {
+        loadedEnvelope = docsData![0].takeoff_envelope as unknown as TakeoffEnvelopeV1;
+      }
 
-      return [...updatedAreas, ...customAreas];
-    });
-  };
+      if (estimateRows.length > 0) {
+        setInsulationAreas(estimateRowsToInsulationAreas(estimateRows, pricing));
+      } else {
+        initializeInsulationAreas(loadedRooms, pricing, {
+          workspaceSummary,
+          envelope: resolution.mode === 'ocr' ? loadedEnvelope : null,
+        });
+      }
+
+      const { data: quoteData } = await supabase
+        .from('quotes')
+        .select('*')
+        .eq('project_id', id)
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (quoteData) {
+        const normalizedQuote = quoteData as QuoteRecord;
+        setQuote(normalizedQuote);
+        const storedLineItems = normalizedQuote.line_items as unknown;
+        if (Array.isArray(storedLineItems)) {
+          restoreFromQuote(storedLineItems);
+        }
+      }
+    } catch (loadError) {
+      console.error('Error loading quote data:', loadError);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [id, initializeInsulationAreas, restoreFromQuote]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const toggleArea = (areaId: string) => {
-    setInsulationAreas(prev =>
-      prev.map(area =>
+    setInsulationAreas((previous) =>
+      previous.map((area) =>
         area.id === areaId ? { ...area, enabled: !area.enabled } : area
       )
     );
   };
 
-  const updateRValue = (areaId: string, value: string) => {
-    const numValue = value === '' ? null : parseFloat(value);
-    setInsulationAreas(prev =>
-      prev.map(area =>
-        area.id === areaId ? { ...area, rValue: numValue } : area
-      )
+  const updateName = (areaId: string, value: string) => {
+    setInsulationAreas((previous) =>
+      previous.map((area) => (area.id === areaId ? { ...area, name: value } : area))
     );
   };
 
   const updateSqft = (areaId: string, value: string) => {
-    const numValue = parseFloat(value) || 0;
-    setInsulationAreas(prev =>
-      prev.map(area =>
-        area.id === areaId ? { ...area, sqft: numValue } : area
-      )
+    const numericValue = roundEstimateValue(parseFloat(value) || 0);
+    setInsulationAreas((previous) =>
+      previous.map((area) => (area.id === areaId ? { ...area, sqft: numericValue } : area))
     );
   };
 
-  const updateName = (areaId: string, value: string) => {
-    setInsulationAreas(prev =>
-      prev.map(area =>
-        area.id === areaId ? { ...area, name: value } : area
-      )
+  const updateUnit = (areaId: string, value: EstimateUnit) => {
+    setInsulationAreas((previous) =>
+      previous.map((area) => (area.id === areaId ? { ...area, unit: value } : area))
     );
   };
 
   const updatePricePerSqft = (areaId: string, value: string) => {
-    const numValue = parseFloat(value) || 0;
-    setInsulationAreas(prev =>
-      prev.map(area =>
-        area.id === areaId ? { ...area, pricePerSqft: numValue } : area
+    const numericValue = roundEstimateValue(parseFloat(value) || 0);
+    setInsulationAreas((previous) =>
+      previous.map((area) =>
+        area.id === areaId ? { ...area, pricePerSqft: numericValue } : area
       )
     );
-  };
-
-  const selectProduct = (areaId: string, productId: string) => {
-    const product = INSULATION_CATALOG.find(p => p.id === productId);
-    if (!product) return;
-    setInsulationAreas(prev =>
-      prev.map(area =>
-        area.id === areaId
-          ? {
-              ...area,
-              selectedProductId: area.selectedProductId === productId ? null : productId,
-              rValue: area.selectedProductId === productId ? null : product.rValue,
-              pricePerSqft: area.selectedProductId === productId ? area.pricePerSqft : product.pricePerSqft,
-            }
-          : area
-      )
-    );
-  };
-
-  const getApplicableProducts = (areaId: string): InsulationProduct[] => {
-    return INSULATION_CATALOG.filter(p => p.applicableAreas.includes(areaId));
   };
 
   const addCustomLineItem = () => {
@@ -570,52 +647,76 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       enabled: true,
       rValue: null,
       sqft: 0,
-      pricePerSqft: 1.50,
+      unit: 'SF',
+      pricePerSqft: 0,
       isCustom: true,
+      group: 'Custom',
     };
-    setInsulationAreas(prev => [...prev, newItem]);
+    setInsulationAreas((previous) => [...previous, newItem]);
   };
 
   const removeCustomLineItem = (areaId: string) => {
-    setInsulationAreas(prev => prev.filter(area => area.id !== areaId));
+    setInsulationAreas((previous) => previous.filter((area) => area.id !== areaId));
   };
 
-  const getEnabledAreas = () => insulationAreas.filter(a => a.enabled);
+  const getEnabledAreas = () => insulationAreas.filter((area) => area.enabled);
+
+  const buildLineItems = () =>
+    getEnabledAreas().map((area) => ({
+      id: area.id,
+      area: area.name,
+      quantity: area.sqft,
+      unit: area.unit,
+      sqft: area.sqft,
+      rValue: area.rValue ?? parseRValueNumber(area.spec),
+      pricePerUnit: area.pricePerSqft,
+      pricePerSqft: area.pricePerSqft,
+      totalCost: roundEstimateValue(area.sqft * area.pricePerSqft),
+      isCustom: area.isCustom || false,
+      section: getSectionForArea(area).title,
+      notes: formatLineDescriptor(area),
+      spec: area.spec ?? null,
+    }));
 
   const getValidationErrors = () => {
     const errors: string[] = [];
     const enabledAreas = getEnabledAreas();
 
-    for (const area of enabledAreas) {
-      if (!area.name || area.name.trim() === '') {
-        errors.push(`Line item name is required`);
-      }
-      if (area.rValue === null || area.rValue <= 0) {
-        errors.push(`${area.name || 'Unnamed item'}: R-value is required`);
-      }
-      if (area.sqft <= 0) {
-        errors.push(`${area.name || 'Unnamed item'}: Square footage must be greater than 0`);
-      }
+    if (enabledAreas.length === 0) {
+      errors.push('Include at least one estimate row before generating the quote.');
     }
 
-    if (enabledAreas.length === 0) {
-      errors.push('Please select at least one insulation area');
+    for (const area of enabledAreas) {
+      if (!area.name || area.name.trim() === '') {
+        errors.push('Every included row needs a line item description.');
+      }
+      if (area.sqft <= 0) {
+        errors.push(`${area.name || 'Unnamed row'} must have a quantity greater than 0.`);
+      }
+      if (area.pricePerSqft < 0) {
+        errors.push(`${area.name || 'Unnamed row'} has an invalid unit rate.`);
+      }
     }
 
     return errors;
   };
 
-  const calculateTotal = () => {
-    const enabledAreas = getEnabledAreas();
-    const totalCost = enabledAreas.reduce((sum, area) => sum + (area.sqft * area.pricePerSqft), 0);
-    const totalSqft = enabledAreas.reduce((sum, area) => sum + area.sqft, 0);
-    return { totalCost, totalSqft };
+  const calculateTotals = () => {
+    const totals = calculateQuoteTotals(buildLineItems(), taxAmount);
+    return {
+      subtotal: totals.subtotal,
+      totalSqft: totals.totalSf,
+      totalLf: totals.totalLf,
+      totalEa: totals.totalEa,
+      quantityLabel: totals.quantityLabel,
+      total: totals.totalCost,
+    };
   };
 
   const handleGenerateQuote = async () => {
     const errors = getValidationErrors();
     if (errors.length > 0) {
-      setError(errors.join(', '));
+      setError(errors[0]);
       return;
     }
 
@@ -623,29 +724,25 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
     setError(null);
 
     try {
-      const enabledAreas = getEnabledAreas();
-      const lineItems = enabledAreas.map(area => ({
-        id: area.id,
-        area: area.name,
-        sqft: area.sqft,
-        rValue: area.rValue,
-        pricePerSqft: area.pricePerSqft,
-        totalCost: area.sqft * area.pricePerSqft,
-        isCustom: area.isCustom || false,
-        selectedProductId: area.selectedProductId || null,
-      }));
+      const lineItems = buildLineItems();
 
-      const { totalCost } = calculateTotal();
+      const { subtotal, total } = calculateTotals();
+      const idempotencyKey = crypto.randomUUID();
 
       const response = await fetch('/api/quote/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify({
           projectId: id,
+          idempotencyKey,
           lineItems,
-          totalCost,
+          subtotal,
+          taxAmount,
+          totalCost: total,
+          terms,
         }),
       });
 
@@ -656,463 +753,368 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       }
 
       setQuote(data.quote);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate quote');
+    } catch (generateError) {
+      setError(generateError instanceof Error ? generateError.message : 'Failed to generate quote');
     } finally {
       setIsGenerating(false);
     }
   };
 
+  const sectionGroups = useMemo(() => {
+    return ESTIMATE_SECTIONS.map((section) => ({
+      ...section,
+      items: insulationAreas.filter((area) => getSectionForArea(area).key === section.key),
+    })).filter((section) => section.items.length > 0 || section.key === 'custom');
+  }, [insulationAreas]);
+
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-8 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin" />
+      <div className="takeoff-shell takeoff-light-theme flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--takeoff-text-muted)]" />
       </div>
     );
   }
 
   const validationErrors = getValidationErrors();
-  const { totalCost, totalSqft } = calculateTotal();
+  const { subtotal, quantityLabel, total } = calculateTotals();
   const enabledAreas = getEnabledAreas();
-  const standardAreas = insulationAreas.filter(a => !a.isCustom);
-  const customAreas = insulationAreas.filter(a => a.isCustom);
+  let rowNumber = 1;
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+    <div className="takeoff-shell takeoff-light-theme min-h-screen px-6 py-8 text-[var(--takeoff-ink)]">
+      <div className="takeoff-dot-grid fixed inset-0 pointer-events-none" />
+      <div className="mx-auto max-w-[1380px]">
+        <div className="relative mb-5 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold">{project?.name}</h1>
-            <p className="text-muted-foreground">Configure and Generate Quote</p>
+            <p className="ev-label">
+              Estimate Template
+            </p>
+            <h1 className="ev-title mt-3 text-[36px]">
+              {project?.name || 'Estimate Quote'}
+            </h1>
+            <p className="ev-muted mt-2 text-sm">
+              Clean estimate worksheet seeded from takeoff.
+            </p>
           </div>
-          <Link href={`/projects/${id}/review`}>
-            <Button variant="outline">Back to Review</Button>
-          </Link>
+          <div className="flex shrink-0 items-center gap-3">
+            <Link href={`/projects/${id}/review`}>
+              <Button variant="outline" className="ev-secondary-action px-5">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back to Review
+              </Button>
+            </Link>
+            <Button
+              onClick={handleGenerateQuote}
+              disabled={isGenerating || validationErrors.length > 0}
+              className="ev-primary-action px-5"
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Generating
+                </>
+              ) : (
+                <>
+                  <FileText className="mr-2 h-4 w-4" />
+                  {quote ? 'Regenerate Quote' : 'Generate Quote'}
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
-        {/* Demo Instructions */}
-        <DemoInstructions
-          title="Step 4: Generate Quote"
-          steps={[
-            "Toggle which insulation areas to include (Attic, Walls, Garage, Floor)",
-            "Select a product or manually set the R-value and price per sq ft",
-            "Add custom line items for any additional work not auto-detected",
-            "Review the quote preview, then click 'Generate Quote' to create the PDF"
-          ]}
-          tip="R-value measures insulation effectiveness. Higher R = better insulation. R-38 to R-60 is typical for attics in most climates."
-        />
+        {error ? (
+          <div className="relative mb-4 flex items-start gap-3 rounded-[18px] border border-[#e0b1b5] bg-[#fff5f5] px-4 py-3 text-sm text-[var(--takeoff-accent)]">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>{error}</p>
+          </div>
+        ) : null}
 
-        {/* Two Column Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Left Column - Configuration */}
-          <div className="lg:col-span-3 space-y-6">
-            {/* Standard Insulation Areas */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Settings className="h-5 w-5" />
-                  Select Insulation Areas
-                  <DemoTooltip>
-                    These areas were auto-detected from your floor plans. Toggle each area on/off and configure the insulation specifications.
-                  </DemoTooltip>
-                </CardTitle>
-                <CardDescription>
-                  Choose which areas to include and set R-values for each
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {standardAreas.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-4">
-                    No areas available. Please ensure measurements are extracted first.
-                  </p>
-                ) : (
-                  standardAreas.map((area) => (
-                    <div
-                      key={area.id}
-                      className={`rounded-lg p-4 transition-all duration-200 ${
-                        area.enabled
-                          ? 'border-l-4 border-l-primary border border-zinc-200 dark:border-zinc-700 shadow-sm'
-                          : 'bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                      }`}
-                    >
-                      <div className="flex items-start gap-4">
-                        <input
-                          type="checkbox"
-                          id={area.id}
-                          checked={area.enabled}
-                          onChange={() => toggleArea(area.id)}
-                          className="mt-1 h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
-                        />
-                        <div className="flex-1 space-y-3">
-                          <div>
-                            <Label htmlFor={area.id} className="text-base font-medium cursor-pointer">
-                              {area.name}
-                            </Label>
-                            <p className="text-sm text-muted-foreground">{area.description}</p>
-                          </div>
+        {validationErrors.length > 0 ? (
+          <div className="relative mb-4 rounded-[18px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-4 py-3 text-sm text-[var(--takeoff-text-muted)]">
+            <p className="font-medium text-[var(--takeoff-ink)]">Finish these before generating:</p>
+            <ul className="mt-2 space-y-1">
+              {validationErrors.slice(0, 3).map((item) => (
+                <li key={item}>• {item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
-                          {area.enabled && (
-                            <div className="space-y-3 pt-2">
-                              {/* Product Card Picker */}
-                              {getApplicableProducts(area.id).length > 0 && (
-                                <div>
-                                  <Label className="text-sm text-muted-foreground mb-2 block">
-                                    Select Product
-                                  </Label>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    {getApplicableProducts(area.id).map((product) => {
-                                      const isSelected = area.selectedProductId === product.id;
-                                      return (
-                                        <button
-                                          key={product.id}
-                                          onClick={() => selectProduct(area.id, product.id)}
-                                          className={`relative text-left rounded-lg border-2 p-3 transition-all duration-150 ${
-                                            isSelected
-                                              ? 'border-primary bg-primary/5 dark:bg-primary/10 shadow-sm'
-                                              : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
-                                          }`}
-                                        >
-                                          {isSelected && (
-                                            <div className="absolute top-2 right-2">
-                                              <Check className="h-4 w-4 text-primary" />
-                                            </div>
-                                          )}
-                                          <div className="flex items-baseline gap-2">
-                                            <span className="text-lg font-bold text-zinc-900 dark:text-white">
-                                              R-{product.rValue}
-                                            </span>
-                                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
-                                              product.type === 'batt'
-                                                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                                                : 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'
-                                            }`}>
-                                              {product.type === 'batt' ? 'Batt' : 'Blown-In'}
-                                            </span>
-                                          </div>
-                                          <p className="text-xs text-muted-foreground mt-1">
-                                            {product.thickness} — {product.description}
-                                          </p>
-                                          <p className="text-sm font-semibold mt-1.5 text-zinc-700 dark:text-zinc-300">
-                                            ${product.pricePerSqft.toFixed(2)}/sf
-                                          </p>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* R-Value / SqFt / Price override inputs */}
-                              <div className="grid grid-cols-3 gap-3">
-                                <div>
-                                  <Label htmlFor={`${area.id}-rvalue`} className="text-sm">
-                                    R-Value
-                                  </Label>
-                                  <Input
-                                    id={`${area.id}-rvalue`}
-                                    type="number"
-                                    min="0"
-                                    step="1"
-                                    placeholder="e.g., 38"
-                                    value={area.rValue ?? ''}
-                                    onChange={(e) => updateRValue(area.id, e.target.value)}
-                                    className="mt-1"
-                                  />
-                                </div>
-                                <div>
-                                  <Label htmlFor={`${area.id}-sqft`} className="text-sm">
-                                    Square Feet
-                                  </Label>
-                                  <Input
-                                    id={`${area.id}-sqft`}
-                                    type="number"
-                                    min="0"
-                                    step="1"
-                                    value={area.sqft}
-                                    onChange={(e) => updateSqft(area.id, e.target.value)}
-                                    className="mt-1"
-                                  />
-                                </div>
-                                <div>
-                                  <Label htmlFor={`${area.id}-price`} className="text-sm">
-                                    $/Sq Ft
-                                  </Label>
-                                  <Input
-                                    id={`${area.id}-price`}
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={area.pricePerSqft}
-                                    onChange={(e) => updatePricePerSqft(area.id, e.target.value)}
-                                    className="mt-1"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Custom Line Items */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <Plus className="h-5 w-5" />
-                    Custom Line Items
-                  </span>
-                  <Button onClick={addCustomLineItem} size="sm">
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Item
-                  </Button>
-                </CardTitle>
-                <CardDescription>
-                  Add additional items not extracted from the PDF
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {customAreas.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-4">
-                    No custom items added. Click "Add Item" to add one.
-                  </p>
-                ) : (
-                  customAreas.map((area) => (
-                    <div
-                      key={area.id}
-                      className="border-l-4 border-l-emerald-500 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4 shadow-sm"
-                    >
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor={`${area.id}-name`} className="text-sm font-medium">
-                            Item Name
-                          </Label>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeCustomLineItem(area.id)}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <Input
-                          id={`${area.id}-name`}
-                          type="text"
-                          placeholder="e.g., Bonus Room Walls"
-                          value={area.name}
-                          onChange={(e) => updateName(area.id, e.target.value)}
-                        />
-                        <div className="grid grid-cols-3 gap-3">
-                          <div>
-                            <Label htmlFor={`${area.id}-rvalue`} className="text-sm">
-                              R-Value
-                            </Label>
-                            <Input
-                              id={`${area.id}-rvalue`}
-                              type="number"
-                              min="0"
-                              step="1"
-                              placeholder="e.g., 38"
-                              value={area.rValue ?? ''}
-                              onChange={(e) => updateRValue(area.id, e.target.value)}
-                              className="mt-1"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor={`${area.id}-sqft`} className="text-sm">
-                              Square Feet
-                            </Label>
-                            <Input
-                              id={`${area.id}-sqft`}
-                              type="number"
-                              min="0"
-                              step="1"
-                              placeholder="0"
-                              value={area.sqft || ''}
-                              onChange={(e) => updateSqft(area.id, e.target.value)}
-                              className="mt-1"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor={`${area.id}-price`} className="text-sm">
-                              $/Sq Ft
-                            </Label>
-                            <Input
-                              id={`${area.id}-price`}
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={area.pricePerSqft}
-                              onChange={(e) => updatePricePerSqft(area.id, e.target.value)}
-                              className="mt-1"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Link to global pricing settings */}
-            <div className="text-center">
-              <Link href="/settings" className="text-sm text-muted-foreground hover:text-primary">
-                Configure global pricing rates →
-              </Link>
+        <div className="relative rounded-[24px] border border-[var(--takeoff-line)] bg-[rgba(255,255,255,0.9)] shadow-[0_20px_50px_rgba(31,39,33,0.08)] backdrop-blur-xl">
+          <div className="border-b border-[var(--takeoff-line)] px-8 py-6">
+            <div className="grid grid-cols-[minmax(0,1fr),130px,130px,150px] gap-4 text-sm">
+              <div>
+                <p className="ev-label">
+                  Estimate worksheet
+                </p>
+                <p className="ev-muted mt-2">
+                  Adjust descriptions, quantity, and unit pricing before quote generation.
+                </p>
+              </div>
+              <div className="rounded-[16px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-4 py-3">
+                <p className="ev-label">
+                  Rows
+                </p>
+                <p className="mt-1 text-xl font-semibold">{enabledAreas.length}</p>
+              </div>
+              <div className="rounded-[16px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-4 py-3">
+                <p className="ev-label">
+                  Quantity
+                </p>
+                <p className="mt-1 text-xl font-semibold">{quantityLabel}</p>
+              </div>
+              <div className="rounded-[16px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-4 py-3">
+                <p className="ev-label">
+                  Subtotal
+                </p>
+                <p className="mt-1 text-xl font-semibold">{formatCurrency(subtotal)}</p>
+              </div>
             </div>
           </div>
 
-          {/* Right Column - Sticky Quote Preview */}
-          <div className="lg:col-span-2">
-            <div className="lg:sticky lg:top-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Quote Preview</CardTitle>
-                  {envelope && (
-                    <p className="text-xs text-cyan-500 flex items-center gap-1 mt-1">
-                      <Layers className="h-3 w-3" />
-                      Scope values sourced from pdfengine OCR
+          <div className="space-y-6 px-8 py-8">
+            {sectionGroups.map((section) => {
+              const sectionSubtotal = roundEstimateValue(
+                section.items
+                  .filter((item) => item.enabled)
+                  .reduce((sum, item) => sum + item.sqft * item.pricePerSqft, 0)
+              );
+
+              return (
+                <section key={section.key} className="overflow-hidden rounded-[20px] border border-[var(--takeoff-line)]">
+                  <div className="flex items-center justify-between border-b border-[rgba(20,24,20,0.16)] bg-[var(--takeoff-ink)] px-5 py-2 text-white">
+                    <p className="takeoff-mono text-[11px] uppercase tracking-[0.24em]">
+                      {section.code} - {section.title}
                     </p>
-                  )}
-                </CardHeader>
-                <CardContent>
-                  {validationErrors.length > 0 && (
-                    <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 rounded-md">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <p className="font-medium text-yellow-900 dark:text-yellow-100 text-sm">
-                            Please fix:
-                          </p>
-                          <ul className="text-xs text-yellow-800 dark:text-yellow-200 mt-1 space-y-1">
-                            {validationErrors.slice(0, 3).map((error, index) => (
-                              <li key={index}>• {error}</li>
-                            ))}
-                            {validationErrors.length > 3 && (
-                              <li>• +{validationErrors.length - 3} more...</li>
-                            )}
-                          </ul>
-                        </div>
+                    <p className="text-sm font-semibold">{formatCurrency(sectionSubtotal)}</p>
+                  </div>
+
+                  <div className="grid grid-cols-[56px,minmax(0,1fr),110px,78px,130px,150px,84px,40px] gap-0 border-b border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] text-[11px] uppercase tracking-[0.18em] text-[var(--takeoff-text-subtle)]">
+                    <span className="px-4 py-3">Item</span>
+                    <span className="border-l border-[var(--takeoff-line)] px-4 py-3">Description</span>
+                    <span className="border-l border-[var(--takeoff-line)] px-4 py-3 text-right">Qty</span>
+                    <span className="border-l border-[var(--takeoff-line)] px-4 py-3">Unit</span>
+                    <span className="border-l border-[var(--takeoff-line)] px-4 py-3 text-right">Unit price</span>
+                    <span className="border-l border-[var(--takeoff-line)] px-4 py-3 text-right">Amount</span>
+                    <span className="border-l border-[var(--takeoff-line)] px-4 py-3 text-right">Use</span>
+                    <span className="border-l border-[var(--takeoff-line)] px-4 py-3" />
+                  </div>
+
+                  <div className="bg-white">
+                    {section.items.length === 0 ? (
+                      <div className="flex items-center justify-between px-5 py-5 text-sm text-[var(--takeoff-text-muted)]">
+                        <span>No rows in this section yet.</span>
+                        {section.key === 'custom' ? (
+                          <Button
+                            variant="outline"
+                            onClick={addCustomLineItem}
+                            className="ev-secondary-action"
+                          >
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add Row
+                          </Button>
+                        ) : null}
                       </div>
-                    </div>
-                  )}
+                      ) : (
+                        section.items.map((area) => {
+                          const descriptor = formatLineDescriptor(area);
+                          const amount = roundEstimateValue(area.sqft * area.pricePerSqft);
+                          const currentRowNumber = rowNumber++;
 
-                  {enabledAreas.length === 0 ? (
-                    <p className="text-muted-foreground text-center py-8">
-                      Select areas to see preview
-                    </p>
-                  ) : (
-                    <>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead className="border-b">
-                            <tr className="text-left">
-                              <th className="pb-2">Area</th>
-                              <th className="pb-2 text-right">Sq Ft</th>
-                              <th className="pb-2 text-right">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {enabledAreas.map((area, index) => (
-                              <tr
-                                key={area.id}
-                                className={index % 2 === 0 ? 'bg-muted/50' : ''}
-                              >
-                                <td className="py-2">
-                                  <div>
-                                    <span className="font-medium">{area.name || 'Unnamed'}</span>
-                                    {area.rValue && (
-                                      <span className="text-xs text-muted-foreground ml-1">
-                                        R-{area.rValue}
-                                      </span>
-                                    )}
-                                    {area.selectedProductId && (
-                                      <div className="text-[11px] text-muted-foreground">
-                                        {INSULATION_CATALOG.find(p => p.id === area.selectedProductId)?.name}
-                                      </div>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="py-2 text-right">{formatSqft(area.sqft)}</td>
-                                <td className="py-2 text-right font-medium">
-                                  {formatCurrency(area.sqft * area.pricePerSqft)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot className="border-t-2">
-                            <tr>
-                              <td className="pt-3 font-bold">Total</td>
-                              <td className="pt-3 text-right text-muted-foreground">
-                                {formatSqft(totalSqft)} sqft
-                              </td>
-                              <td className="pt-3 text-right font-bold text-lg">
-                                {formatCurrency(totalCost)}
-                              </td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-
-                      <div className="mt-6 space-y-3">
-                        <Button
-                          onClick={handleGenerateQuote}
-                          disabled={isGenerating || validationErrors.length > 0}
-                          className="w-full"
-                        >
-                          {isGenerating ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Generating...
-                            </>
-                          ) : (
-                            <>
-                              <FileText className="mr-2 h-4 w-4" />
-                              {quote ? 'Regenerate Quote' : 'Generate Quote'}
-                            </>
-                          )}
-                        </Button>
-
-                        {quote?.pdf_url && (
-                          <>
-                            <Button
-                              variant="outline"
-                              className="w-full"
-                              onClick={() => {
-                                const subject = encodeURIComponent(`Insulation Quote - ${project?.name || 'Project'}`);
-                                const body = encodeURIComponent(`Please find the insulation quote attached.\n\nDownload: ${quote.pdf_url}`);
-                                window.open(`mailto:?subject=${subject}&body=${body}`);
-                              }}
+                          return (
+                            <div
+                              key={area.id}
+                              className={`grid grid-cols-[56px,minmax(0,1fr),110px,78px,130px,150px,84px,40px] gap-0 border-b border-[var(--takeoff-line)] ${
+                                area.enabled ? 'bg-white' : 'bg-[var(--takeoff-paper)] text-[var(--takeoff-text-subtle)]'
+                              }`}
                             >
-                              <Mail className="mr-2 h-4 w-4" />
-                              Email Quote
-                            </Button>
-                            <a href={quote.pdf_url} target="_blank" rel="noopener noreferrer" className="block">
-                              <Button variant="outline" className="w-full">
-                                <Download className="mr-2 h-4 w-4" />
-                                Download PDF
-                              </Button>
-                            </a>
-                          </>
-                        )}
-                      </div>
+                              <div className="px-4 py-4 text-sm font-medium text-[var(--takeoff-text-muted)]">
+                                {currentRowNumber}
+                              </div>
 
-                      {error && (
-                        <div className="mt-4 p-3 bg-destructive/10 text-destructive rounded-md text-sm">
-                          {error}
-                        </div>
+                              <div className="border-l border-[var(--takeoff-line)] px-4 py-3">
+                                <Input
+                                  value={area.name}
+                                  onChange={(event) => updateName(area.id, event.target.value)}
+                                  placeholder="Line item description"
+                                  className="h-10 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
+                                />
+                                {descriptor ? (
+                                  <p className="mt-1 text-xs leading-5 text-[var(--takeoff-text-muted)]">{descriptor}</p>
+                                ) : null}
+                              </div>
+
+                              <div className="border-l border-[var(--takeoff-line)] px-3 py-3">
+                                <Input
+                                  value={formatEditableNumber(area.sqft)}
+                                  onChange={(event) => updateSqft(area.id, event.target.value)}
+                                  inputMode="decimal"
+                                  className="h-10 border-0 bg-transparent px-0 text-right text-sm shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+
+                              <div className="border-l border-[var(--takeoff-line)] px-3 py-3">
+                                <select
+                                  value={area.unit}
+                                  onChange={(event) => updateUnit(area.id, event.target.value as EstimateUnit)}
+                                  className="h-10 w-full border-0 bg-transparent px-0 text-sm text-[var(--takeoff-ink)] outline-none"
+                                >
+                                  <option value="SF">SF</option>
+                                  <option value="LF">LF</option>
+                                  <option value="EA">EA</option>
+                                </select>
+                              </div>
+
+                              <div className="border-l border-[var(--takeoff-line)] px-3 py-3">
+                                <Input
+                                  value={formatEditableNumber(area.pricePerSqft)}
+                                  onChange={(event) => updatePricePerSqft(area.id, event.target.value)}
+                                  inputMode="decimal"
+                                  className="h-10 border-0 bg-transparent px-0 text-right text-sm shadow-none focus-visible:ring-0"
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-end border-l border-[var(--takeoff-line)] px-4 py-3 text-sm font-semibold">
+                                {formatCurrency(amount)}
+                              </div>
+
+                              <div className="flex items-center justify-end border-l border-[var(--takeoff-line)] px-4 py-3">
+                                <label className="flex items-center justify-end">
+                                  <input
+                                    type="checkbox"
+                                    checked={area.enabled}
+                                    onChange={() => toggleArea(area.id)}
+                                  className="h-4 w-4 rounded border-[var(--takeoff-line)] text-[var(--takeoff-ink)] focus:ring-[var(--takeoff-ink)]"
+                                  />
+                                </label>
+                              </div>
+
+                              <div className="flex items-center justify-center border-l border-[var(--takeoff-line)] px-1 py-3">
+                                {area.isCustom ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => removeCustomLineItem(area.id)}
+                                    className="h-8 w-8 text-[var(--takeoff-text-muted)] hover:bg-[var(--takeoff-paper)] hover:text-[var(--takeoff-ink)]"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })
                       )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-5 py-3 text-sm">
+                    <div className="flex items-center gap-4">
+                      {section.key === 'custom' ? (
+                        <Button
+                          variant="ghost"
+                          onClick={addCustomLineItem}
+                          className="h-auto px-0 text-[var(--takeoff-ink)] hover:bg-transparent hover:text-[var(--takeoff-accent)]"
+                        >
+                          <Plus className="mr-2 h-4 w-4" />
+                          Add Row
+                        </Button>
+                      ) : (
+                        <span className="ev-label">
+                          Section subtotal
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-semibold">{formatCurrency(sectionSubtotal)}</span>
+                  </div>
+                </section>
+              );
+            })}
+
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <section className="rounded-[20px] border border-[var(--takeoff-line)] bg-white p-6">
+                <div className="flex items-center justify-between border-b border-[var(--takeoff-line)] pb-3">
+                  <p className="ev-label">
+                    Terms & Conditions
+                  </p>
+                </div>
+                <textarea
+                  value={terms}
+                  onChange={(event) => setTerms(event.target.value)}
+                  className="mt-4 min-h-[140px] w-full resize-none border-0 bg-transparent px-0 py-0 text-sm leading-7 text-[var(--takeoff-text-muted)] outline-none"
+                  placeholder="Add estimate notes, exclusions, or payment terms."
+                />
+              </section>
+
+              <section className="rounded-[20px] border border-[var(--takeoff-line)] bg-white p-6">
+                <div className="space-y-3">
+                  <div className="rounded-[16px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-4 py-3">
+                    <div className="flex items-center justify-between">
+                      <span className="ev-label">
+                        Subtotal
+                      </span>
+                      <span className="font-semibold">{formatCurrency(subtotal)}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-[16px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="ev-label">
+                        Tax
+                      </span>
+                      <Input
+                        value={formatEditableNumber(taxAmount)}
+                        onChange={(event) =>
+                          setTaxAmount(roundEstimateValue(parseFloat(event.target.value) || 0))
+                        }
+                        inputMode="decimal"
+                        className="h-10 border-0 bg-transparent px-0 text-right text-sm shadow-none focus-visible:ring-0"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-[16px] border border-[rgba(20,24,20,0.16)] bg-[#edf5e8] px-4 py-4">
+                    <div className="flex items-center justify-between">
+                      <span className="takeoff-mono text-[12px] uppercase tracking-[0.22em] text-[#47644a]">
+                        Total
+                      </span>
+                      <span className="text-xl font-semibold">{formatCurrency(total)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {quote?.pdf_url ? (
+                  <div className="mt-6 space-y-3">
+                    <Button
+                      variant="outline"
+                      className="ev-secondary-action w-full"
+                      onClick={() => {
+                        const downloadUrl =
+                          quote.download_url ||
+                          (quote.pdf_url?.startsWith('http')
+                            ? quote.pdf_url
+                            : `${window.location.origin}${quote.pdf_url}`);
+                        const subject = encodeURIComponent(
+                          `Insulation Quote - ${project?.name || 'Project'}`
+                        );
+                        const body = encodeURIComponent(
+                          `Please find the insulation quote attached.\n\nDownload: ${downloadUrl}`
+                        );
+                        window.open(`mailto:?subject=${subject}&body=${body}`);
+                      }}
+                    >
+                      <Mail className="mr-2 h-4 w-4" />
+                      Email Quote
+                    </Button>
+                    <a href={quote.download_url || quote.pdf_url} target="_blank" rel="noopener noreferrer" className="block">
+                      <Button className="ev-primary-action w-full">
+                        <Download className="mr-2 h-4 w-4" />
+                        Download PDF
+                      </Button>
+                    </a>
+                  </div>
+                ) : null}
+              </section>
             </div>
           </div>
         </div>

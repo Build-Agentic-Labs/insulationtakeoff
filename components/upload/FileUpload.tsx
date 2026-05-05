@@ -6,7 +6,7 @@ import { Upload, FileText, Image, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface FileUploadProps {
-  onFileSelect: (file: File) => void;
+  onFileSelect: (file: File | null) => void;
   maxSize?: number; // in MB
 }
 
@@ -59,6 +59,7 @@ export function FileUpload({ onFileSelect, maxSize = 50 }: FileUploadProps) {
   const clearFile = () => {
     setSelectedFile(null);
     setError(null);
+    onFileSelect(null);
   };
 
   return (
@@ -66,36 +67,36 @@ export function FileUpload({ onFileSelect, maxSize = 50 }: FileUploadProps) {
       {!selectedFile ? (
         <div
           {...getRootProps()}
-          className={`border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-colors ${
+          className={`cursor-pointer rounded-[22px] border-2 border-dashed p-12 text-center transition-colors ${
             isDragActive
-              ? 'border-primary bg-primary/5'
-              : 'border-border hover:border-primary/50'
+              ? 'border-[var(--takeoff-line-strong)] bg-white'
+              : 'border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] hover:border-[var(--takeoff-line-strong)]'
           }`}
         >
           <input {...getInputProps()} />
-          <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <Upload className="mx-auto mb-4 h-12 w-12 text-[var(--takeoff-text-muted)]" />
           <p className="text-lg font-medium mb-2">
             {isDragActive ? 'Drop the file here' : 'Drag & drop a file here'}
           </p>
-          <p className="text-sm text-muted-foreground mb-4">
+          <p className="mb-4 text-sm text-[var(--takeoff-text-muted)]">
             or click to browse
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-[var(--takeoff-text-subtle)]">
             Accepted formats: {ACCEPTED_EXTENSIONS.join(', ')} (max {maxSize}MB)
           </p>
         </div>
       ) : (
-        <div className="border rounded-lg p-6">
+        <div className="rounded-[22px] border border-[var(--takeoff-line)] bg-white p-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {isImageFile(selectedFile) ? (
-                <Image className="h-10 w-10 text-blue-500" />
+                <Image className="h-10 w-10 text-[#47644a]" />
               ) : (
-                <FileText className="h-10 w-10 text-primary" />
+                <FileText className="h-10 w-10 text-[var(--takeoff-accent)]" />
               )}
               <div>
                 <p className="font-medium">{selectedFile.name}</p>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-[var(--takeoff-text-muted)]">
                   {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
                 </p>
               </div>

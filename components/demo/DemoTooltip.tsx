@@ -20,14 +20,14 @@ export function DemoTooltip({ children, className }: DemoTooltipProps) {
         <TooltipTrigger asChild>
           <button
             type="button"
-            className={`inline-flex items-center justify-center rounded-full w-4 h-4 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors ${className}`}
+            className={`inline-flex h-4 w-4 items-center justify-center rounded-[6px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] text-[var(--takeoff-text-muted)] transition-colors hover:bg-white hover:text-[var(--takeoff-ink)] ${className}`}
           >
             <Info className="w-3 h-3" />
           </button>
         </TooltipTrigger>
         <TooltipContent
           side="top"
-          className="max-w-xs bg-zinc-800 border border-cyan-500/30 text-zinc-200"
+          className="max-w-xs border border-[var(--takeoff-line)] bg-white text-[var(--takeoff-ink)] shadow-[0_18px_36px_rgba(31,39,33,0.16)]"
         >
           {children}
         </TooltipContent>

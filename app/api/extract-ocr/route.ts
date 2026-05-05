@@ -4,6 +4,8 @@ import { startOrReturnRun, finishRun } from '@/lib/supabase/extractionRuns';
 import { computeComparisonMetrics } from '@/lib/comparison/computeMetrics';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 import { canonicalizePreset } from '@/lib/constants/planPresets';
+import { requireServerCompanyId } from '@/lib/supabase/company-server';
+import { createSignedStorageUrl } from '@/lib/supabase/storage';
 
 export const maxDuration = 300;
 
@@ -113,9 +115,11 @@ export async function POST(request: NextRequest) {
   let projectId: string | undefined;
   let documentId: string | undefined;
   let runId: string | undefined;
+  let companyId: string | undefined;
 
   try {
     const body = await request.json();
+    companyId = await requireServerCompanyId();
     projectId = body.projectId;
     documentId = body.documentId;
     const idempotencyKey: string = body.idempotencyKey || crypto.randomUUID();
@@ -137,6 +141,7 @@ export async function POST(request: NextRequest) {
       .from('projects')
       .select('*')
       .eq('id', projectId)
+      .eq('company_id', companyId)
       .single();
 
     if (projectError || !project) {
@@ -148,19 +153,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Find or auto-create Supabase document row
+    let documentFileUrl: string | null = null;
     if (!documentId) {
       const { data: docs } = await supabaseAdmin
         .from('documents')
-        .select('id')
+        .select('id, file_url')
         .eq('project_id', projectId)
+        .eq('company_id', companyId)
         .order('created_at', { ascending: false })
         .limit(1);
       documentId = docs?.[0]?.id;
+      documentFileUrl = docs?.[0]?.file_url ?? null;
 
       if (!documentId) {
         const { data: newDoc, error: docError } = await supabaseAdmin
           .from('documents')
           .insert({
+            company_id: companyId,
             project_id: projectId,
             name: project.name || 'Uploaded PDF',
             file_url: project.pdf_url,
@@ -173,16 +182,33 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Failed to create document record' }, { status: 500 });
         }
         documentId = newDoc.id;
+        documentFileUrl = project.pdf_url;
       }
+    } else {
+      const { data: doc, error: docError } = await supabaseAdmin
+        .from('documents')
+        .select('id, file_url')
+        .eq('id', documentId)
+        .eq('project_id', projectId)
+        .eq('company_id', companyId)
+        .single();
+
+      if (docError || !doc) {
+        return NextResponse.json({ error: 'Project document not found' }, { status: 404 });
+      }
+      documentFileUrl = doc.file_url;
     }
+
+    const activePdfUrl = documentFileUrl || project.pdf_url;
 
     // Idempotency: check or create run
     const { run, isExisting } = await startOrReturnRun({
+      companyId,
       projectId,
       documentId,
       mode: 'hybrid',
       idempotencyKey,
-      requestJson: { pdf_url: project.pdf_url, mode: 'hybrid' },
+      requestJson: { pdf_url: activePdfUrl, mode: 'hybrid' },
     });
     runId = run.id;
 
@@ -199,7 +225,7 @@ export async function POST(request: NextRequest) {
     if (isExisting && !run.finished_at) {
       return NextResponse.json(
         {
-          error: 'Extraction already in progress for this project.',
+          error: 'Automated takeoff is already in progress for this project.',
           run_id: run.id,
           project_status: 'extracting',
           project_id: projectId,
@@ -212,7 +238,8 @@ export async function POST(request: NextRequest) {
     await supabaseAdmin
       .from('projects')
       .update({ status: 'extracting' })
-      .eq('id', projectId);
+      .eq('id', projectId)
+      .eq('company_id', companyId);
 
     // === pdfengine 3-step flow ===
     // 1. Create project in pdfengine
@@ -221,7 +248,8 @@ export async function POST(request: NextRequest) {
 
     // 2. Upload PDF to pdfengine
     console.log('Uploading PDF to pdfengine...');
-    const peDocId = await uploadToPdfengine(peProjectId, project.pdf_url, `${project.name || 'document'}.pdf`);
+    const signedPdfUrl = await createSignedStorageUrl(activePdfUrl, companyId);
+    const peDocId = await uploadToPdfengine(peProjectId, signedPdfUrl, `${project.name || 'document'}.pdf`);
 
     // 3. Process + poll
     console.log('Starting pdfengine processing (mode=hybrid)...',
@@ -233,8 +261,8 @@ export async function POST(request: NextRequest) {
 
     if (result.status === 'failed' || result.status === 'error') {
       const errMsg = result.error_message || 'pdfengine processing failed';
-      await finishRun({ runId, status: 'failed', error: errMsg });
-      await supabaseAdmin.from('projects').update({ status: 'reviewing' }).eq('id', projectId);
+      await finishRun({ companyId, runId, status: 'failed', error: errMsg });
+      await supabaseAdmin.from('projects').update({ status: 'reviewing' }).eq('id', projectId).eq('company_id', companyId);
       return NextResponse.json({ ok: false, run_id: runId, error: errMsg }, { status: 502 });
     }
 
@@ -280,7 +308,7 @@ export async function POST(request: NextRequest) {
     let metricsJson: Record<string, unknown> | undefined;
     if (runStatus !== 'failed') {
       try {
-        const metrics = await computeComparisonMetrics(projectId, 'hybrid', runId);
+        const metrics = await computeComparisonMetrics(companyId, projectId, 'hybrid', runId);
         if (metrics) metricsJson = metrics as unknown as Record<string, unknown>;
       } catch (e) {
         console.warn('Comparison metrics failed (non-blocking):', e);
@@ -289,6 +317,7 @@ export async function POST(request: NextRequest) {
 
     // Persist to extraction_runs
     await finishRun({
+      companyId,
       runId,
       status: runStatus,
       envelope: envelope || undefined,
@@ -301,14 +330,16 @@ export async function POST(request: NextRequest) {
       await supabaseAdmin
         .from('documents')
         .update({ takeoff_envelope: envelope as any })
-        .eq('id', documentId);
+        .eq('id', documentId)
+        .eq('company_id', companyId);
     }
 
     // Update project status
     await supabaseAdmin
       .from('projects')
       .update({ status: runStatus === 'failed' ? 'uploaded' : 'reviewing' })
-      .eq('id', projectId);
+      .eq('id', projectId)
+      .eq('company_id', companyId);
 
     return NextResponse.json({
       ok: true,
@@ -322,14 +353,14 @@ export async function POST(request: NextRequest) {
     const isConnectionError = error instanceof TypeError
       && (error.message === 'fetch failed' || (error.cause as any)?.code === 'ECONNREFUSED');
     const errMsg = isConnectionError
-      ? `Hybrid extraction engine is not reachable at ${PDFENGINE_BASE_URL}. Start pdfengine or try Vision mode.`
-      : (error instanceof Error ? error.message : 'OCR extraction failed');
+      ? `Hybrid extraction engine is not reachable at ${PDFENGINE_BASE_URL}. Start pdfengine, then retry automated takeoff.`
+      : (error instanceof Error ? error.message : 'Automated takeoff failed');
 
-    if (runId) {
-      await finishRun({ runId, status: 'failed', error: errMsg }).catch(() => {});
+    if (runId && companyId) {
+      await finishRun({ companyId, runId, status: 'failed', error: errMsg }).catch(() => {});
     }
-    if (projectId) {
-      await supabaseAdmin.from('projects').update({ status: 'reviewing' }).eq('id', projectId);
+    if (projectId && companyId) {
+      await supabaseAdmin.from('projects').update({ status: 'reviewing' }).eq('id', projectId).eq('company_id', companyId);
     }
 
     return NextResponse.json({ ok: false, run_id: runId, error: errMsg }, { status: 502 });

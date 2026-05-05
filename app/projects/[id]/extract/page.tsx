@@ -3,13 +3,13 @@
 import { use, useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { ScanningOverlay } from '@/components/extraction/ScanningOverlay';
 import { AnalysisPanel } from '@/components/extraction/AnalysisPanel';
-import { ScopeCard } from '@/components/extraction/ScopeCard';
 import { TakeoffResults } from '@/components/extraction/TakeoffResults';
 import { Button } from '@/components/ui/button';
-import { Loader2, ArrowLeft, Lightbulb, Eye, RotateCcw, ArrowRight } from 'lucide-react';
+import { Loader2, ArrowLeft, Lightbulb, RotateCcw, ArrowRight } from 'lucide-react';
 import { DemoTooltip } from '@/components/demo/DemoTooltip';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 import { PLAN_PRESETS, detectPlanPreset } from '@/lib/constants/planPresets';
@@ -19,9 +19,6 @@ import 'react-pdf/dist/Page/TextLayer.css';
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
 
 type OcrOutcome = 'none' | 'complete' | 'review' | 'failed';
-
-const DEFAULT_MODE: 'vision' | 'ocr' =
-  (process.env.NEXT_PUBLIC_DEFAULT_EXTRACTION_MODE as 'vision' | 'ocr') || 'ocr';
 
 export default function ExtractPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -33,10 +30,8 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
   const [isComplete, setIsComplete] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [autoStarted, setAutoStarted] = useState(false);
-  const [extractionMode, setExtractionMode] = useState<'vision' | 'ocr'>(DEFAULT_MODE);
 
-  // M8.2: OCR outcome branching + Vision fallback
+  // M8.2: automated takeoff outcome branching
   const [ocrOutcome, setOcrOutcome] = useState<OcrOutcome>('none');
   const [envelope, setEnvelope] = useState<TakeoffEnvelopeV1 | null>(null);
   const [lastIdempotencyKey, setLastIdempotencyKey] = useState<string | null>(null);
@@ -69,16 +64,6 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     return () => window.removeEventListener('resize', updateHeight);
   }, []);
 
-  // Auto-start extraction once project loads
-  // Pass project.plan_preset directly to avoid race condition —
-  // planPreset state isn't populated yet when this effect fires.
-  useEffect(() => {
-    if (project && !autoStarted && !isExtracting && !isComplete) {
-      setAutoStarted(true);
-      startExtraction({ planNameOverride: project.plan_preset || undefined });
-    }
-  }, [project]);
-
   // Auto-advance pages during extraction
   useEffect(() => {
     if (isExtracting && numPages > 1) {
@@ -99,19 +84,20 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
 
   const loadProject = async () => {
     try {
+      const companyId = await getActiveCompanyId();
       const { data } = await supabase
         .from('projects')
         .select('*')
         .eq('id', id)
+        .eq('company_id', companyId)
         .single();
-      // Auto-detect and persist preset before setting project,
-      // so the auto-start effect sees it on project.plan_preset.
+      // Auto-detect and persist preset before the user starts automated takeoff.
       if (!data?.plan_preset && data?.name) {
         const detected = detectPlanPreset(data.name);
         if (detected) {
           data.plan_preset = detected;
           setPlanPreset(detected);
-          supabase.from('projects').update({ plan_preset: detected }).eq('id', id);
+          supabase.from('projects').update({ plan_preset: detected }).eq('id', id).eq('company_id', companyId);
         }
       } else if (data?.plan_preset) {
         setPlanPreset(data.plan_preset);
@@ -124,8 +110,7 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     }
   };
 
-  const startExtraction = async (opts?: { forceNewKey?: boolean; modeOverride?: 'vision' | 'ocr'; planNameOverride?: string }) => {
-    const mode = opts?.modeOverride ?? extractionMode;
+  const startExtraction = async (opts?: { forceNewKey?: boolean; planNameOverride?: string }) => {
     const effectivePlanName = opts?.planNameOverride ?? planPreset ?? undefined;
     setIsExtracting(true);
     setHasError(false);
@@ -139,9 +124,8 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     setLastIdempotencyKey(idempotencyKey);
 
     try {
-      const endpoint = mode === 'ocr' ? '/api/extract-ocr' : '/api/extract';
-      console.log('[EXTRACT] Sending request:', { projectId: id, idempotencyKey, planName: effectivePlanName, mode });
-      const response = await fetch(endpoint, {
+      console.log('[EXTRACT] Sending request:', { projectId: id, idempotencyKey, planName: effectivePlanName, mode: 'ocr' });
+      const response = await fetch('/api/extract-ocr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId: id, idempotencyKey, planName: effectivePlanName }),
@@ -152,14 +136,14 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error('Extraction timed out — the PDF may be too large. Please try again.');
+        throw new Error('Automated takeoff timed out — the PDF may be too large. Please try again.');
       }
 
       if (!response.ok) {
         if (response.status === 409) {
-          throw new Error(data.error || 'Extraction already in progress.');
+          throw new Error(data.error || 'Automated takeoff is already in progress.');
         }
-        throw new Error(data.error || 'Extraction failed');
+        throw new Error(data.error || 'Automated takeoff failed');
       }
 
       // Capture run_id + envelope if present
@@ -185,8 +169,8 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
         clearInterval(pageIntervalRef.current);
       }
 
-      // Branch on OCR outcome
-      if (mode === 'ocr' && env) {
+      // Branch on automated takeoff outcome
+      if (env) {
         if (env.status === 'complete') {
           setOcrOutcome('complete');
           setIsComplete(true);
@@ -203,23 +187,21 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
         // failed
         setOcrOutcome('failed');
         setHasError(true);
-        setErrorMessage(
-          env.errors?.[0]?.message
-            || env.completeness?.degradation_reason
-            || 'OCR could not complete extraction'
-        );
+          setErrorMessage(
+            env.errors?.[0]?.message
+              || env.completeness?.degradation_reason
+            || 'Automated takeoff could not complete'
+          );
         return;
       }
 
-      // Vision mode (or OCR without envelope)
+      // Fallback for successful responses without an envelope.
       setIsComplete(true);
       setTimeout(() => router.push(`/projects/${id}/review`), 1200);
     } catch (err) {
       setHasError(true);
-      setErrorMessage(err instanceof Error ? err.message : 'Extraction failed');
-      if (mode === 'ocr') {
-        setOcrOutcome('failed');
-      }
+      setErrorMessage(err instanceof Error ? err.message : 'Automated takeoff failed');
+      setOcrOutcome('failed');
       setIsExtracting(false);
       if (pageIntervalRef.current) {
         clearInterval(pageIntervalRef.current);
@@ -235,27 +217,20 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
     startExtraction({ forceNewKey: true });
   };
 
-  const handleVisionFallback = () => {
-    setHasError(false);
-    setErrorMessage('');
-    setIsComplete(false);
-    setOcrOutcome('none');
-    setExtractionMode('vision');
-    startExtraction({ forceNewKey: true, modeOverride: 'vision' });
-  };
-
   const handlePresetChange = async (value: string) => {
     const preset = value === 'auto' ? null : value;
     setPlanPreset(preset);
     setDetectedPreset(null);
-    await supabase.from('projects').update({ plan_preset: preset }).eq('id', id);
+    const companyId = await getActiveCompanyId();
+    await supabase.from('projects').update({ plan_preset: preset }).eq('id', id).eq('company_id', companyId);
   };
 
   const handleUseSuggestion = async () => {
     if (detectedPreset) {
       setPlanPreset(detectedPreset);
       setDetectedPreset(null);
-      await supabase.from('projects').update({ plan_preset: detectedPreset }).eq('id', id);
+      const companyId = await getActiveCompanyId();
+      await supabase.from('projects').update({ plan_preset: detectedPreset }).eq('id', id).eq('company_id', companyId);
     }
   };
 
@@ -266,78 +241,54 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
 
   if (isLoading) {
     return (
-      <div className="h-screen bg-zinc-950 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
+      <div className="flex h-screen items-center justify-center bg-[#0e1511]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#b6c5b5]" />
       </div>
     );
   }
 
   if (!project) {
     return (
-      <div className="h-screen bg-zinc-950 flex items-center justify-center">
-        <p className="text-zinc-500">Project not found</p>
+      <div className="flex h-screen items-center justify-center bg-[#0e1511]">
+        <p className="text-[#b6c5b5]">Project not found</p>
       </div>
     );
   }
 
   return (
-    <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#0e1511]">
       {/* Minimal header */}
-      <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center justify-between shrink-0">
+      <div className="flex shrink-0 items-center justify-between border-b border-[rgba(216,222,212,0.12)] px-4 py-2.5">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => router.push(`/projects/${id}`)}
             disabled={isExtracting}
-            className="text-zinc-400 hover:text-white"
+            className="text-[#b6c5b5] hover:text-white"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
-          <div className="h-4 w-px bg-zinc-800" />
-          <h1 className="text-sm font-medium text-zinc-300">{project.name}</h1>
-          <div className="h-4 w-px bg-zinc-800" />
-          <div className="flex items-center gap-2 px-2 py-1 rounded bg-cyan-500/10 border border-cyan-500/20">
-            <Lightbulb className="h-3 w-3 text-cyan-400" />
-            <span className="text-xs text-cyan-300">Step 2: AI Extraction</span>
+          <div className="h-4 w-px bg-[rgba(216,222,212,0.12)]" />
+          <h1 className="text-sm font-medium text-[#edf3ea]">{project.name}</h1>
+          <div className="h-4 w-px bg-[rgba(216,222,212,0.12)]" />
+          <div className="flex items-center gap-2 rounded-full border border-[rgba(216,222,212,0.14)] bg-[rgba(245,248,241,0.08)] px-2 py-1">
+            <Lightbulb className="h-3 w-3 text-[#d4a843]" />
+            <span className="text-xs text-[#edf3ea]">Step 2: Automated Takeoff</span>
             <DemoTooltip>
-              Our AI is analyzing your document page-by-page, extracting room dimensions, wall measurements, door counts, and window counts. This typically takes 15-30 seconds.
+              Start extraction when you are ready. The file can stay attached to the project without being scanned.
             </DemoTooltip>
           </div>
-          {!isExtracting && !isComplete && ocrOutcome === 'none' && !hasError && (
-            <div className="flex items-center gap-1 bg-zinc-800 rounded-lg p-0.5">
-              <button
-                onClick={() => setExtractionMode('vision')}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                  extractionMode === 'vision'
-                    ? 'bg-cyan-600 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Vision
-              </button>
-              <button
-                onClick={() => setExtractionMode('ocr')}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                  extractionMode === 'ocr'
-                    ? 'bg-cyan-600 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                OCR
-              </button>
-            </div>
-          )}
           {/* Plan preset dropdown */}
           {!isExtracting && !isComplete && (
             <>
               <div className="flex items-center gap-2">
-                <div className="h-4 w-px bg-zinc-800" />
+                <div className="h-4 w-px bg-[rgba(216,222,212,0.12)]" />
                 <select
                   value={planPreset || 'auto'}
                   onChange={(e) => handlePresetChange(e.target.value)}
-                  className="bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500"
+                  className="rounded-full border border-[rgba(216,222,212,0.14)] bg-[rgba(245,248,241,0.08)] px-2 py-1.5 text-xs text-[#edf3ea] focus:outline-none focus:border-[#f5f8f1]"
                 >
                   <option value="auto">Auto / Unknown</option>
                   {PLAN_PRESETS.map(p => (
@@ -345,18 +296,18 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
                   ))}
                 </select>
                 {planPreset && (
-                  <span className="text-[10px] text-cyan-400 font-mono">
+                  <span className="font-mono text-[10px] text-[#b6c5b5]">
                     preset: {planPreset}
                   </span>
                 )}
               </div>
               {/* Auto-detection suggestion */}
               {!planPreset && detectedPreset && (
-                <div className="flex items-center gap-1.5 text-[11px] text-amber-400/80">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#d4a843]">
                   <span>Suggested: &ldquo;{detectedPreset}&rdquo;</span>
                   <button
                     onClick={handleUseSuggestion}
-                    className="underline hover:text-amber-300"
+                    className="underline hover:text-[#f0c763]"
                   >
                     Use this preset
                   </button>
@@ -368,11 +319,25 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
 
         {/* Action buttons based on outcome */}
         <div className="flex items-center gap-2">
+          {!isExtracting && !isComplete && ocrOutcome === 'none' && !hasError && (
+            <Button
+              size="sm"
+              onClick={() => startExtraction({
+                forceNewKey: true,
+                planNameOverride: planPreset ?? project.plan_preset ?? undefined,
+              })}
+              disabled={!project.pdf_url}
+              className="bg-[#f5f8f1] text-[#141814] hover:bg-white"
+            >
+              Start Automated Takeoff
+            </Button>
+          )}
+
           {hasError && ocrOutcome !== 'failed' && (
             <Button
               size="sm"
               onClick={handleRetry}
-              className="bg-cyan-600 hover:bg-cyan-700 text-white"
+              className="bg-[#f5f8f1] text-[#141814] hover:bg-white"
             >
               <RotateCcw className="h-3 w-3 mr-2" />
               Retry
@@ -385,18 +350,10 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
                 size="sm"
                 variant="outline"
                 onClick={handleRetry}
-                className="border-zinc-700 text-zinc-300 hover:text-white"
+                className="border-[rgba(216,222,212,0.14)] bg-transparent text-[#b6c5b5] hover:bg-[rgba(245,248,241,0.08)] hover:text-white"
               >
                 <RotateCcw className="h-3 w-3 mr-2" />
-                Retry OCR
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleVisionFallback}
-                className="bg-cyan-600 hover:bg-cyan-700 text-white"
-              >
-                <Eye className="h-3 w-3 mr-2" />
-                Try Vision
+                Retry Automated Takeoff
               </Button>
             </>
           )}
@@ -407,18 +364,10 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
                 size="sm"
                 variant="outline"
                 onClick={() => router.push(`/projects/${id}/review`)}
-                className="border-zinc-700 text-zinc-300 hover:text-white"
+                className="border-[rgba(216,222,212,0.14)] bg-transparent text-[#b6c5b5] hover:bg-[rgba(245,248,241,0.08)] hover:text-white"
               >
                 <ArrowRight className="h-3 w-3 mr-2" />
                 Go to Review
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleVisionFallback}
-                className="bg-cyan-600 hover:bg-cyan-700 text-white"
-              >
-                <Eye className="h-3 w-3 mr-2" />
-                Run Vision to cross-check
               </Button>
             </>
           )}
@@ -429,18 +378,22 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
       <div ref={containerRef} className="flex-1 relative overflow-hidden flex">
         {/* PDF area */}
         <div className={`relative overflow-hidden ${(ocrOutcome === 'complete' || ocrOutcome === 'review') && envelope ? 'flex-1' : 'w-full'}`}>
-          <div className="absolute inset-0 flex items-center justify-center bg-zinc-950 overflow-auto">
+          <div className="absolute inset-0 flex items-center justify-center overflow-auto bg-[#0e1511]">
             <div
               className={`relative ${isExtracting ? 'animate-pulse-glow' : ''}`}
               style={{ borderRadius: '4px' }}
             >
               {pdfError ? (
                 <div
-                  className="flex flex-col items-center justify-center bg-zinc-900 rounded gap-3"
+                  className="flex flex-col items-center justify-center gap-3 rounded bg-[#122019]"
                   style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
                 >
-                  <p className="text-zinc-400 text-sm">PDF preview unavailable</p>
-                  <p className="text-zinc-600 text-xs">Extraction is still running in the background</p>
+                  <p className="text-sm text-[#b6c5b5]">PDF preview unavailable</p>
+                  <p className="text-xs text-[#8ea08f]">
+                    {isExtracting
+                      ? 'Automated takeoff is still running in the background'
+                      : 'The file is still attached to this project'}
+                  </p>
                 </div>
               ) : (
                 <Document
@@ -452,10 +405,10 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
                   onLoadError={() => setPdfError(true)}
                   loading={
                     <div
-                      className="flex items-center justify-center bg-zinc-900 rounded"
+                      className="flex items-center justify-center rounded bg-[#122019]"
                       style={{ height: pdfHeight, width: pdfHeight * 0.77 }}
                     >
-                      <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
+                      <Loader2 className="h-6 w-6 animate-spin text-[#8ea08f]" />
                     </div>
                   }
                 >
@@ -477,8 +430,8 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
 
           {/* Page indicator — bottom center */}
           {numPages > 0 && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-zinc-800/90 backdrop-blur px-3 py-1.5 rounded-full">
-              <p className="text-xs text-zinc-400">
+            <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full border border-[rgba(216,222,212,0.14)] bg-[#122019]/90 px-3 py-1.5 backdrop-blur">
+              <p className="text-xs text-[#b6c5b5]">
                 Page {currentPage} of {numPages}
               </p>
             </div>
@@ -486,7 +439,7 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
 
           {/* Floating analysis panel — bottom right (during extraction only) */}
           {(isExtracting || hasError || (ocrOutcome === 'failed')) && (
-            <div className="absolute bottom-4 right-4 z-20 w-80 max-h-[60%] rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-zinc-800">
+            <div className="absolute bottom-4 right-4 z-20 max-h-[60%] w-80 overflow-hidden rounded-[18px] border border-[rgba(216,222,212,0.14)] shadow-2xl shadow-black/50">
               <AnalysisPanel
                 isActive={isExtracting}
                 isComplete={isComplete}
@@ -500,7 +453,7 @@ export default function ExtractPage({ params }: { params: Promise<{ id: string }
 
         {/* Results side panel — slides in when results available */}
         {(ocrOutcome === 'complete' || ocrOutcome === 'review') && envelope && (
-          <div className="w-[420px] border-l border-zinc-800 bg-zinc-900/80 overflow-y-auto p-5">
+          <div className="w-[420px] overflow-y-auto border-l border-[rgba(216,222,212,0.12)] bg-[#122019]/88 p-5">
             <TakeoffResults
               envelope={envelope}
               onGenerateQuote={() => router.push(`/projects/${id}/quote`)}

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { requireServerCompanyId } from '@/lib/supabase/company-server';
+import { assertCompanyStoragePath, getStoragePath } from '@/lib/supabase/storage';
 
 export async function DELETE(
   request: NextRequest,
@@ -7,12 +9,14 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const companyId = await requireServerCompanyId();
 
     // Get the document to find the file URL
     const { data: document, error: fetchError } = await supabaseAdmin
       .from('documents')
       .select('file_url')
       .eq('id', id)
+      .eq('company_id', companyId)
       .single();
 
     if (fetchError) {
@@ -25,9 +29,9 @@ export async function DELETE(
 
     // Delete file from storage
     if (document.file_url) {
-      const urlParts = document.file_url.split('/pdfs/');
-      if (urlParts.length > 1) {
-        const filePath = urlParts[1].split('?')[0];
+      const filePath = getStoragePath(document.file_url);
+      if (filePath) {
+        assertCompanyStoragePath(filePath, companyId);
         await supabaseAdmin.storage.from('pdfs').remove([filePath]);
       }
     }
@@ -36,7 +40,8 @@ export async function DELETE(
     const { error: deleteError } = await supabaseAdmin
       .from('documents')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('company_id', companyId);
 
     if (deleteError) {
       console.error('Error deleting document:', deleteError);

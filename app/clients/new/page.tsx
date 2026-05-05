@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
+import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -34,9 +35,11 @@ export default function NewClientPage() {
     setError(null);
 
     try {
+      const companyId = await getActiveCompanyId();
       const { data, error: insertError } = await supabase
         .from('clients')
         .insert({
+          company_id: companyId,
           name: formData.name.trim(),
           email: formData.email.trim() || null,
           phone: formData.phone.trim() || null,
@@ -56,32 +59,34 @@ export default function NewClientPage() {
   };
 
   return (
-    <div className="p-8">
+    <div className="ev-page ev-page-grid min-h-screen">
+      <div className="ev-container">
       {/* Header */}
       <div className="mb-8">
         <Link
           href="/clients"
-          className="inline-flex items-center gap-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors mb-4"
+          className="ev-secondary-action mb-4 inline-flex items-center gap-2 rounded-[12px] px-4 py-2 text-[11px] font-semibold transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Clients
         </Link>
-        <h1 className="text-3xl font-bold text-zinc-900 dark:text-white">Add New Client</h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mt-1">
+        <p className="ev-label">Client Intake</p>
+        <h1 className="ev-title mt-2 text-[42px]">Add New Client</h1>
+        <p className="ev-muted mt-2 text-sm">
           Create a new client to organize their projects
         </p>
       </div>
 
       <div className="max-w-2xl">
-        <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
+        <Card className="ev-card">
           <CardHeader>
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Building2 className="h-5 w-5 text-primary" />
+              <div className="ev-icon-box h-10 w-10 rounded-[14px]">
+                <Building2 className="h-5 w-5" />
               </div>
               <div>
                 <CardTitle>Client Information</CardTitle>
-                <CardDescription>Enter the client's details below</CardDescription>
+                <CardDescription>Enter the client&apos;s details below</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -96,7 +101,7 @@ export default function NewClientPage() {
                   placeholder="e.g., Johnson Construction"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
+                  className="ev-input"
                 />
               </div>
 
@@ -109,7 +114,7 @@ export default function NewClientPage() {
                     placeholder="client@example.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
+                    className="ev-input"
                   />
                 </div>
 
@@ -121,7 +126,7 @@ export default function NewClientPage() {
                     placeholder="(555) 123-4567"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
+                    className="ev-input"
                   />
                 </div>
               </div>
@@ -133,7 +138,7 @@ export default function NewClientPage() {
                   placeholder="123 Main St, City, State 12345"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  className="bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
+                  className="ev-input"
                 />
               </div>
 
@@ -145,18 +150,18 @@ export default function NewClientPage() {
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 rounded-md border bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="ev-input w-full rounded-[18px] border px-3 py-2 text-sm"
                 />
               </div>
 
               {error && (
-                <div className="p-3 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded-lg text-red-600 dark:text-red-400 text-sm">
+                <div className="rounded-[14px] border border-[#e0b1b5] bg-[#fff5f5] p-3 text-sm text-[var(--takeoff-accent)]">
                   {error}
                 </div>
               )}
 
               <div className="flex gap-3 pt-4">
-                <Button type="submit" disabled={isLoading} className="flex-1">
+                <Button type="submit" disabled={isLoading} className="ev-primary-action flex-1">
                   {isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -178,6 +183,7 @@ export default function NewClientPage() {
             </form>
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

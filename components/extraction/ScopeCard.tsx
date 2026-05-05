@@ -29,21 +29,21 @@ function StatusBadge({ status }: { status: FieldStatus }) {
   const config = {
     final: {
       label: 'Final',
-      className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+      className: 'ev-status-completed',
     },
     estimated: {
       label: 'Estimated',
-      className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+      className: 'ev-status-extracted',
     },
     missing: {
       label: 'Missing',
-      className: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500',
+      className: 'ev-status-default',
     },
   };
 
   const c = config[status];
   return (
-    <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${c.className}`}>
+    <span className={`ev-status text-[10px] uppercase ${c.className}`}>
       {c.label}
     </span>
   );
@@ -77,20 +77,20 @@ function ScopeRow({ icon, label, value, unit, status, secondary }: ScopeRowProps
   if (status === 'missing' && value === 0) return null;
 
   return (
-    <div className="flex items-center justify-between py-2 border-b border-zinc-800 last:border-0">
+    <div className="flex items-center justify-between border-b border-[var(--takeoff-line)] py-2 last:border-0">
       <div className="flex items-center gap-2.5">
-        <div className="h-7 w-7 rounded flex items-center justify-center bg-zinc-800 text-zinc-400">
+        <div className="ev-icon-box flex h-7 w-7 items-center justify-center rounded-[10px]">
           {icon}
         </div>
         <div>
-          <p className="text-sm text-zinc-200">{label}</p>
+          <p className="text-sm text-[var(--takeoff-ink)]">{label}</p>
           {secondary && (
-            <p className="text-xs text-zinc-500">{secondary}</p>
+            <p className="text-xs text-[var(--takeoff-text-muted)]">{secondary}</p>
           )}
         </div>
       </div>
       <div className="flex items-center gap-2.5">
-        <span className="text-sm font-semibold text-white tabular-nums">
+        <span className="text-sm font-semibold tabular-nums text-[var(--takeoff-ink)]">
           {value > 0 ? `${Math.round(value).toLocaleString()} ${unit}` : '—'}
         </span>
         <StatusBadge status={status} />
@@ -118,18 +118,18 @@ export function ScopeCard({ envelope, onDownload }: ScopeCardProps) {
   const hasWarnings = foundationIssues.some((i) => i.severity === 'warning');
 
   return (
-    <Card className="border-zinc-700 bg-zinc-900/50">
+    <Card className="ev-card">
       <CardHeader className="py-3 px-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg flex items-center justify-center bg-cyan-500/10 text-cyan-400">
+            <div className="ev-icon-box flex h-9 w-9 items-center justify-center rounded-[14px]">
               <Layers className="h-5 w-5" />
             </div>
             <div>
-              <CardTitle className="text-base text-zinc-100">
+              <CardTitle className="text-base text-[var(--takeoff-ink)]">
                 Scope (pdfengine)
               </CardTitle>
-              <p className="text-xs text-zinc-500 mt-0.5">
+              <p className="mt-0.5 text-xs text-[var(--takeoff-text-muted)]">
                 OCR pipeline • confidence{' '}
                 {Math.round(envelope.telemetry.overall_confidence * 100)}%
               </p>
@@ -137,12 +137,12 @@ export function ScopeCard({ envelope, onDownload }: ScopeCardProps) {
           </div>
           <div className="flex items-center gap-2">
             {envelope.status === 'review' && (
-              <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-amber-900/30 text-amber-400">
+              <span className="ev-status ev-status-extracted text-[10px] uppercase">
                 Needs review
               </span>
             )}
             {onDownload && (
-              <Button variant="ghost" size="sm" onClick={onDownload} className="text-zinc-400 hover:text-white">
+              <Button variant="ghost" size="sm" onClick={onDownload}>
                 <Download className="h-3.5 w-3.5 mr-1" />
                 JSON
               </Button>
@@ -198,10 +198,10 @@ export function ScopeCard({ envelope, onDownload }: ScopeCardProps) {
 
         {/* Foundation issues */}
         {foundationIssues.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-zinc-800">
+          <div className="mt-3 border-t border-[var(--takeoff-line)] pt-3">
             <button
               onClick={() => setIssuesExpanded(!issuesExpanded)}
-              className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors w-full"
+              className="flex w-full items-center gap-1.5 text-xs text-[var(--takeoff-text-muted)] transition-colors hover:text-[var(--takeoff-ink)]"
             >
               {issuesExpanded ? (
                 <ChevronDown className="h-3 w-3" />
@@ -217,13 +217,13 @@ export function ScopeCard({ envelope, onDownload }: ScopeCardProps) {
                 {foundationIssues.map((issue) => (
                   <div
                     key={issue.item_id}
-                    className="flex items-start gap-2 text-xs text-zinc-400 bg-zinc-800/50 rounded px-2.5 py-2"
+                    className="flex items-start gap-2 rounded-[14px] bg-[var(--takeoff-paper)] px-2.5 py-2 text-xs text-[var(--takeoff-text-muted)]"
                   >
                     <SeverityIcon severity={issue.severity} />
                     <div>
                       <p>{issue.message}</p>
                       {issue.recommended_action && (
-                        <p className="text-zinc-500 mt-0.5">{issue.recommended_action}</p>
+                        <p className="mt-0.5 text-[var(--takeoff-text-subtle)]">{issue.recommended_action}</p>
                       )}
                     </div>
                   </div>

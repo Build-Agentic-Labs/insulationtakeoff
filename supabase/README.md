@@ -19,8 +19,8 @@ Copy `.env.local.example` to `.env.local` and fill in your Supabase credentials:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
-NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
-SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="<your-supabase-anon-key>"
+SUPABASE_SERVICE_ROLE_KEY="<your-supabase-service-role-key>"
 ```
 
 You can find these values in your Supabase project settings under "API".

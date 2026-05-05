@@ -35,6 +35,8 @@ const OCR_ENVELOPE: TakeoffEnvelopeV1 = {
     footprint_depth_ft: 30,
     estimated_crawlspace_sf: 800,
     estimated_rim_joist_lf: 120,
+    estimated_garage_wall_sf: 0,
+    estimated_sound_floor_sf: 0,
   },
   buckets: [
     { height_ft: 9, gross_sf: 1200, net_sf: 1000, opening_sf: 200, segment_count: 8 },

@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { requireServerCompanyId } from '@/lib/supabase/company-server';
+import { createSignedStorageUrl } from '@/lib/supabase/storage';
 
 const PDFENGINE_URL = process.env.PDFENGINE_BASE_URL ?? process.env.PDFENGINE_URL ?? '';
-const USE_MOCK = !PDFENGINE_URL;
+const USE_MOCK = !PDFENGINE_URL && process.env.NODE_ENV !== 'production';
 
 export async function POST(request: NextRequest) {
   try {
     const { document_id, page_index, bbox, dpi = 150 } = await request.json();
+    const companyId = await requireServerCompanyId();
 
     if (!document_id || page_index == null || !bbox) {
       return NextResponse.json(
@@ -74,23 +77,33 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (!PDFENGINE_URL) {
+      return NextResponse.json(
+        { error: 'PDF extraction engine is not configured' },
+        { status: 503 }
+      );
+    }
+
     // Production mode: call pdfengine
     const supabase = supabaseAdmin;
     const { data: doc, error: docErr } = await supabase
       .from('documents')
       .select('file_url')
       .eq('id', document_id)
+      .eq('company_id', companyId)
       .single();
 
     if (docErr || !doc) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
 
+    const signedPdfUrl = await createSignedStorageUrl(doc.file_url, companyId);
+
     const res = await fetch(`${PDFENGINE_URL}/takeoff/analyze-region`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        pdf_url: doc.file_url,
+        pdf_url: signedPdfUrl,
         page_index,
         bbox,
         dpi,

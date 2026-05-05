@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { requireServerCompanyId } from '@/lib/supabase/company-server';
+import { storagePathToAppUrl, validateUploadFile } from '@/lib/supabase/storage';
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const projectId = formData.get('projectId') as string;
+    const companyId = await requireServerCompanyId();
 
     if (!file) {
       return NextResponse.json(
@@ -21,20 +24,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file size (50MB max)
-    const maxSize = 50 * 1024 * 1024;
-    if (file.size > maxSize) {
+    const { data: project, error: projectError } = await supabaseAdmin
+      .from('projects')
+      .select('id')
+      .eq('id', projectId)
+      .eq('company_id', companyId)
+      .single();
+
+    if (projectError || !project) {
       return NextResponse.json(
-        { error: 'File size exceeds 50MB limit' },
+        { error: 'Project not found' },
+        { status: 404 }
+      );
+    }
+
+    const validationError = validateUploadFile(file);
+    if (validationError) {
+      return NextResponse.json(
+        { error: validationError },
         { status: 400 }
       );
     }
 
     // Generate unique filename
-    const fileExt = file.name.split('.').pop()?.toLowerCase() || '';
     const timestamp = Date.now();
     const fileName = `${timestamp}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    const filePath = `documents/${projectId}/${fileName}`;
+    const filePath = `companies/${companyId}/documents/${projectId}/${fileName}`;
 
     // Convert file to buffer
     const bytes = await file.arrayBuffer();
@@ -56,18 +71,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get public URL
-    const { data: urlData } = supabaseAdmin.storage
-      .from('pdfs')
-      .getPublicUrl(filePath);
-
     // Create document record
     const { data: document, error: dbError } = await supabaseAdmin
       .from('documents')
       .insert({
         project_id: projectId,
+        company_id: companyId,
         name: file.name,
-        file_url: urlData.publicUrl,
+        file_url: storagePathToAppUrl(filePath),
         file_type: file.type,
         file_size: file.size,
       })
@@ -99,6 +110,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get('projectId');
+    const companyId = await requireServerCompanyId();
 
     if (!projectId) {
       return NextResponse.json(
@@ -111,6 +123,7 @@ export async function GET(request: NextRequest) {
       .from('documents')
       .select('*')
       .eq('project_id', projectId)
+      .eq('company_id', companyId)
       .order('created_at', { ascending: false });
 
     if (error) {

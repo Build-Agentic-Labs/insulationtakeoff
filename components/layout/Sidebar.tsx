@@ -1,19 +1,21 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { supabase } from '@/lib/supabase/client';
 import {
   Users,
-  FolderOpen,
   Settings,
   Home,
   ChevronLeft,
   ChevronRight,
   Plus,
+  LogOut,
+  UserCircle,
+  Building2,
 } from 'lucide-react';
 
 interface NavItem {
@@ -35,11 +37,6 @@ const navItems: NavItem[] = [
     icon: <Users className="h-5 w-5" />,
   },
   {
-    title: 'All Projects',
-    href: '/projects',
-    icon: <FolderOpen className="h-5 w-5" />,
-  },
-  {
     title: 'Settings',
     href: '/settings',
     icon: <Settings className="h-5 w-5" />,
@@ -48,32 +45,104 @@ const navItems: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [companyName, setCompanyName] = useState<string>('Workspace');
+  const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (active) setUserEmail(data.user?.email ?? null);
+    });
+
+    const loadCompany = async () => {
+      const { data: membership } = await supabase
+        .from('company_members')
+        .select('company_id')
+        .limit(1)
+        .maybeSingle();
+
+      if (!active || !membership?.company_id) return;
+
+      const { data: company } = await supabase
+        .from('companies')
+        .select('name, logo_url')
+        .eq('id', membership.company_id)
+        .maybeSingle();
+
+      if (active && company) {
+        if (company.name) setCompanyName(company.name);
+        setCompanyLogoUrl(company.logo_url ?? null);
+      }
+    };
+
+    loadCompany();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user.email ?? null);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.replace('/login');
+    router.refresh();
+  };
+
+  if (pathname === '/login' || pathname === '/company/setup') {
+    return null;
+  }
 
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 h-screen bg-zinc-950 text-white transition-all duration-300 ease-in-out flex flex-col",
+        "sticky left-0 top-0 z-40 flex h-screen flex-col border-r border-[rgba(216,222,212,0.14)] bg-[#0e1511] text-[#edf3ea] shadow-[14px_0_40px_rgba(10,15,12,0.2)] transition-all duration-300 ease-in-out",
         collapsed ? "w-16" : "w-64"
       )}
     >
       {/* Logo */}
-      <div className="h-16 flex items-center justify-between px-4 border-b border-zinc-800">
-        <Link href="/" className="flex items-center gap-3">
-          <Image
-            src="/ev-insulation-logo.jpg"
-            alt="EV Insulation"
-            width={36}
-            height={36}
-            className="rounded-lg flex-shrink-0"
-          />
+      <div
+        className={cn(
+          "flex items-center justify-center border-b border-[rgba(216,222,212,0.12)] px-4 transition-all duration-300",
+          collapsed ? "h-16" : "h-36 py-5"
+        )}
+      >
+        <Link
+          href="/"
+          className={cn(
+            "flex items-center",
+            collapsed ? "justify-center" : "flex-col justify-center gap-3 text-center"
+          )}
+        >
           <span
             className={cn(
-              "font-semibold text-lg whitespace-nowrap transition-all duration-300",
+              "flex flex-shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-white/[0.08]",
+              collapsed ? "h-9 w-9" : "h-20 w-32"
+            )}
+          >
+            {companyLogoUrl ? (
+              <img src={companyLogoUrl} alt="" className="h-full w-full object-contain p-1" />
+            ) : (
+              <Building2 className={cn("text-[#dce8d8]", collapsed ? "h-5 w-5" : "h-7 w-7")} />
+            )}
+          </span>
+          <span
+            className={cn(
+              "max-w-[13rem] text-[15px] font-semibold leading-tight tracking-[-0.02em] transition-all duration-300",
               collapsed ? "opacity-0 w-0" : "opacity-100"
             )}
           >
-            EV Insulation
+            {companyName}
           </span>
         </Link>
       </div>
@@ -83,7 +152,7 @@ export function Sidebar() {
         <Link href="/projects/new">
           <Button
             className={cn(
-              "w-full justify-start gap-2 bg-primary hover:bg-primary/90 transition-all duration-200",
+              "w-full justify-start gap-2 rounded-[12px] border border-[rgba(245,248,241,0.16)] bg-[var(--takeoff-paper-strong)] text-[var(--takeoff-ink)] shadow-none transition-all duration-200 hover:bg-white",
               collapsed && "justify-center px-2"
             )}
           >
@@ -113,8 +182,8 @@ export function Sidebar() {
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group",
                 isActive
-                  ? "bg-white/10 text-white"
-                  : "text-zinc-400 hover:bg-white/5 hover:text-white",
+                  ? "bg-[rgba(245,248,241,0.12)] text-white"
+                  : "text-[#b6c5b5] hover:bg-[rgba(245,248,241,0.07)] hover:text-white",
                 collapsed && "justify-center px-2"
               )}
             >
@@ -142,12 +211,40 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Collapse Toggle */}
-      <div className="p-3 border-t border-zinc-800">
+      <div className={cn(
+        "border-t border-[rgba(216,222,212,0.12)] p-3",
+        collapsed && "px-2"
+      )}>
+        <div className={cn(
+          "mb-2 flex items-start gap-3 rounded-lg px-3 py-2.5 text-[#b6c5b5]",
+          collapsed && "justify-center px-2"
+        )}>
+          <UserCircle className="mt-1 h-5 w-5 shrink-0" />
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <div className="takeoff-mono text-[9px] uppercase tracking-[0.18em] text-[#7f917f]">
+                Signed in
+              </div>
+              <div className="break-all text-[12px] leading-snug text-white">
+                {userEmail ?? 'Workspace user'}
+              </div>
+            </div>
+          )}
+        </div>
+        <button
+          onClick={handleSignOut}
+          className={cn(
+            "mb-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[#b6c5b5] transition-all duration-200 hover:bg-[rgba(245,248,241,0.07)] hover:text-white",
+            collapsed && "justify-center px-2"
+          )}
+        >
+          <LogOut className="h-5 w-5" />
+          {!collapsed && <span>Sign out</span>}
+        </button>
         <button
           onClick={() => setCollapsed(!collapsed)}
           className={cn(
-            "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-zinc-400 hover:bg-white/5 hover:text-white transition-all duration-200",
+            "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[#b6c5b5] transition-all duration-200 hover:bg-[rgba(245,248,241,0.07)] hover:text-white",
             collapsed && "justify-center px-2"
           )}
         >

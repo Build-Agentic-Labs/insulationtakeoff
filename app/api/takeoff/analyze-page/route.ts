@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+import { getAnthropicClient } from '@/lib/ai/claude-client';
+import { requireServerCompanyId } from '@/lib/supabase/company-server';
+import { authApiErrorResponse } from '@/lib/supabase/api-errors';
 
 interface WallRegion {
   label: string;
@@ -41,6 +41,7 @@ Focus on continuous wall sections and avoid overlapping regions. If you cannot i
 
 export async function POST(request: NextRequest) {
   try {
+    await requireServerCompanyId();
     const { image_base64, page_index } = await request.json();
 
     // Validate inputs
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Call Claude Vision API
-    const message = await anthropic.messages.create({
+    const message = await getAnthropicClient().messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
       messages: [
@@ -158,6 +159,9 @@ export async function POST(request: NextRequest) {
       page_index,
     });
   } catch (error: any) {
+    const authResponse = authApiErrorResponse(error);
+    if (authResponse.status !== 500) return authResponse;
+
     console.error('Vision analysis error:', error);
     return NextResponse.json(
       {

@@ -97,31 +97,31 @@ export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage, oc
       : Math.round((currentStep / ANALYSIS_STEPS.length) * 100);
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900/95 backdrop-blur-sm">
+    <div className="flex h-full flex-col bg-[#122019]/95 backdrop-blur-sm">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-zinc-800">
+      <div className="border-b border-[rgba(216,222,212,0.12)] px-5 py-4">
         <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-            <Brain className="h-4 w-4 text-cyan-400" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-[12px] border border-[rgba(216,222,212,0.14)] bg-[rgba(245,248,241,0.08)]">
+            <Brain className="h-4 w-4 text-[#d4a843]" />
           </div>
           <div>
             <h3 className="text-sm font-semibold text-white">AI Analysis</h3>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-[#8ea08f]">
               {isComplete
-                ? 'Extraction complete'
+                ? 'Automated takeoff complete'
                 : isOcrReview
-                  ? 'OCR finished — review recommended'
+                  ? 'Automated takeoff finished — review recommended'
                   : isOcrFailed
-                    ? 'OCR could not complete'
+                    ? 'Automated takeoff could not complete'
                     : hasError
-                      ? 'Extraction failed'
+                      ? 'Automated takeoff failed'
                       : 'Analyzing document...'}
             </p>
           </div>
         </div>
 
         {/* Progress bar */}
-        <div className="mt-3 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[rgba(245,248,241,0.08)]">
           <div
             className="h-full rounded-full transition-all duration-700 ease-out"
             style={{
@@ -129,14 +129,14 @@ export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage, oc
               background: hasError || isOcrFailed
                 ? 'rgb(239, 68, 68)'
                 : isComplete
-                  ? 'rgb(34, 197, 94)'
+                  ? 'rgb(142, 177, 109)'
                   : isOcrReview
-                    ? 'rgb(245, 158, 11)'
-                    : 'linear-gradient(90deg, rgb(34, 211, 238), rgb(59, 130, 246))',
+                    ? 'rgb(212, 168, 67)'
+                    : 'linear-gradient(90deg, rgb(214, 230, 216), rgb(142, 177, 109))',
             }}
           />
         </div>
-        <p className="text-xs text-zinc-500 mt-1.5">{progressPercent}% complete</p>
+        <p className="mt-1.5 text-xs text-[#8ea08f]">{progressPercent}% complete</p>
       </div>
 
       {/* Messages */}
@@ -154,17 +154,17 @@ export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage, oc
             >
               <div className="flex items-start gap-2.5">
                 {isDone ? (
-                  <CheckCircle2 className="h-4 w-4 text-green-400 mt-0.5 shrink-0" />
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#8eb16d]" />
                 ) : isCurrent ? (
-                  <Loader2 className="h-4 w-4 text-cyan-400 mt-0.5 shrink-0 animate-spin" />
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#d4a843]" />
                 ) : (
-                  <div className="h-4 w-4 rounded-full border border-zinc-700 mt-0.5 shrink-0" />
+                  <div className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-[rgba(216,222,212,0.14)]" />
                 )}
                 <div>
-                  <p className={`text-sm font-medium ${isDone ? 'text-zinc-400' : 'text-white'}`}>
+                  <p className={`text-sm font-medium ${isDone ? 'text-[#b6c5b5]' : 'text-white'}`}>
                     {step.label}
                   </p>
-                  <p className="text-xs text-zinc-600 mt-0.5">
+                  <p className="mt-0.5 text-xs text-[#8ea08f]">
                     {step.detail}
                   </p>
                 </div>
@@ -174,44 +174,44 @@ export function AnalysisPanel({ isActive, isComplete, hasError, errorMessage, oc
         })}
 
         {isComplete && (
-          <div className="animate-fade-in-up mt-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+          <div className="animate-fade-in-up mt-4 rounded-[14px] border border-[#8eb16d]/20 bg-[#8eb16d]/10 p-3">
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-green-400" />
-              <p className="text-sm text-green-300 font-medium">
-                Extraction complete
+              <CheckCircle2 className="h-4 w-4 text-[#8eb16d]" />
+              <p className="text-sm font-medium text-[#dfe6db]">
+                Automated takeoff complete
               </p>
             </div>
-            <p className="text-xs text-green-400/70 mt-1 ml-6">
+            <p className="ml-6 mt-1 text-xs text-[#b6c5b5]">
               Redirecting to review...
             </p>
           </div>
         )}
 
         {hasError && !isOcrReview && (
-          <div className="animate-fade-in-up mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-            <p className="text-sm text-red-300 font-medium">
-              {isOcrFailed ? 'OCR could not complete' : 'Extraction failed'}
+          <div className="animate-fade-in-up mt-4 rounded-[14px] border border-[#d71921]/20 bg-[#d71921]/10 p-3">
+            <p className="text-sm font-medium text-[#ffb8bd]">
+              {isOcrFailed ? 'Automated takeoff could not complete' : 'Automated takeoff failed'}
             </p>
             {errorMessage && (
-              <p className="text-xs text-red-400/70 mt-1">
+              <p className="mt-1 text-xs text-[#ffb8bd]/75">
                 {errorMessage}
               </p>
             )}
             {isOcrFailed && (
-              <p className="text-xs text-zinc-500 mt-2">
-                Use the buttons above to retry OCR or try Vision extraction.
+              <p className="mt-2 text-xs text-[#8ea08f]">
+                Use the button above to retry automated takeoff.
               </p>
             )}
           </div>
         )}
 
         {isOcrReview && (
-          <div className="animate-fade-in-up mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-            <p className="text-sm text-amber-300 font-medium">
-              OCR finished — needs review
+          <div className="animate-fade-in-up mt-4 rounded-[14px] border border-[#d4a843]/20 bg-[#d4a843]/10 p-3">
+            <p className="text-sm font-medium text-[#f0c763]">
+              Automated takeoff finished — needs review
             </p>
-            <p className="text-xs text-amber-400/70 mt-1">
-              Scope data extracted but some fields need verification. You can go to review or run Vision to cross-check.
+            <p className="mt-1 text-xs text-[#f0c763]/75">
+              Scope data was extracted, but some fields still need verification in review.
             </p>
           </div>
         )}

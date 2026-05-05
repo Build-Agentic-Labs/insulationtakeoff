@@ -48,16 +48,18 @@ interface VisionSummary {
 /**
  * Extract Vision summary from rooms + openings tables for a project.
  */
-async function getVisionSummary(projectId: string): Promise<VisionSummary | null> {
+async function getVisionSummary(projectId: string, companyId: string): Promise<VisionSummary | null> {
   const { data: rooms } = await supabaseAdmin
     .from('rooms')
     .select('type, area_sqft, wall_sf, ceiling_sf, floor_sf')
-    .eq('project_id', projectId);
+    .eq('project_id', projectId)
+    .eq('company_id', companyId);
 
   const { data: openings } = await supabaseAdmin
     .from('openings')
     .select('type, area_sqft, count')
-    .eq('project_id', projectId);
+    .eq('project_id', projectId)
+    .eq('company_id', companyId);
 
   if (!rooms || rooms.length === 0) return null;
 
@@ -92,11 +94,12 @@ async function getVisionSummary(projectId: string): Promise<VisionSummary | null
 /**
  * Extract OCR summary from the latest envelope for a project.
  */
-async function getOcrEnvelope(projectId: string): Promise<TakeoffEnvelopeV1 | null> {
+async function getOcrEnvelope(projectId: string, companyId: string): Promise<TakeoffEnvelopeV1 | null> {
   const { data } = await supabaseAdmin
     .from('documents')
     .select('takeoff_envelope')
     .eq('project_id', projectId)
+    .eq('company_id', companyId)
     .not('takeoff_envelope', 'is', null)
     .order('created_at', { ascending: false })
     .limit(1);
@@ -133,13 +136,14 @@ function computeAgreement(deltas: (number | null)[], references: (number | null)
  * Returns null if only one source is available.
  */
 export async function computeComparisonMetrics(
+  companyId: string,
   projectId: string,
   currentMode: 'ocr' | 'vision' | 'hybrid',
   currentRunId: string,
 ): Promise<ComparisonMetrics | null> {
   const [envelope, visionSummary] = await Promise.all([
-    getOcrEnvelope(projectId),
-    getVisionSummary(projectId),
+    getOcrEnvelope(projectId, companyId),
+    getVisionSummary(projectId, companyId),
   ]);
 
   if (!envelope || !visionSummary) return null;
@@ -158,6 +162,7 @@ export async function computeComparisonMetrics(
   const { data: otherRuns } = await supabaseAdmin
     .from('extraction_runs')
     .select('id')
+    .eq('company_id', companyId)
     .eq('project_id', projectId)
     .in('mode', otherMode === 'ocr' ? ['ocr', 'hybrid'] : ['vision'])
     .in('status', ['complete', 'review'])

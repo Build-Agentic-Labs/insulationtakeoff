@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
-import { uploadFile, isAllowedFileType } from '@/lib/supabase/storage';
-
-const ALLOWED_TYPES = [
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-];
+import { uploadFile, validateUploadFile } from '@/lib/supabase/storage';
+import { requireServerCompanyId } from '@/lib/supabase/company-server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,6 +9,7 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File;
     const projectName = formData.get('name') as string;
     const clientId = formData.get('clientId') as string | null;
+    const companyId = await requireServerCompanyId();
 
     if (!file) {
       return NextResponse.json(
@@ -30,21 +25,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file type
-    if (!isAllowedFileType(file.type)) {
+    const validationError = validateUploadFile(file);
+    if (validationError) {
       return NextResponse.json(
-        { error: 'Only PDF and image files (JPG, PNG, WEBP) are allowed' },
+        { error: validationError },
         { status: 400 }
       );
     }
 
-    // Validate file size (50MB max)
-    const maxSize = parseInt(process.env.MAX_PDF_SIZE_MB || '50') * 1024 * 1024;
-    if (file.size > maxSize) {
-      return NextResponse.json(
-        { error: `File size exceeds ${process.env.MAX_PDF_SIZE_MB || '50'}MB limit` },
-        { status: 400 }
-      );
+    if (clientId) {
+      const { data: client, error: clientError } = await supabaseAdmin
+        .from('clients')
+        .select('id')
+        .eq('id', clientId)
+        .eq('company_id', companyId)
+        .single();
+
+      if (clientError || !client) {
+        return NextResponse.json(
+          { error: 'Client not found' },
+          { status: 404 }
+        );
+      }
     }
 
     // Create project record first to get the ID
@@ -52,6 +54,7 @@ export async function POST(request: NextRequest) {
       .from('projects')
       .insert({
         name: projectName,
+        company_id: companyId,
         pdf_url: '', // Will update after upload
         status: 'uploaded',
         client_id: clientId || null,
@@ -68,18 +71,38 @@ export async function POST(request: NextRequest) {
     }
 
     // Upload file to storage
-    const fileUrl = await uploadFile(file, project.id);
+    const fileUrl = await uploadFile(file, project.id, companyId);
 
     // Update project with file URL
     const { error: updateError } = await supabaseAdmin
       .from('projects')
       .update({ pdf_url: fileUrl })
-      .eq('id', project.id);
+      .eq('id', project.id)
+      .eq('company_id', companyId);
 
     if (updateError) {
       console.error('Error updating project:', updateError);
       return NextResponse.json(
         { error: 'Failed to update project with file URL' },
+        { status: 500 }
+      );
+    }
+
+    const { error: documentError } = await supabaseAdmin
+      .from('documents')
+      .insert({
+        project_id: project.id,
+        company_id: companyId,
+        name: file.name,
+        file_url: fileUrl,
+        file_type: file.type,
+        file_size: file.size,
+      });
+
+    if (documentError) {
+      console.error('Error creating document record:', documentError);
+      return NextResponse.json(
+        { error: 'Failed to create document record' },
         { status: 500 }
       );
     }

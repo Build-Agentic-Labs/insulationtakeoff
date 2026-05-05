@@ -3,6 +3,7 @@
 import { use, useEffect, useState, ReactNode } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
+import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -30,7 +31,6 @@ import {
   ChevronRight,
   LucideIcon,
   Activity,
-  Eye,
   Scan,
   AlertTriangle,
   RotateCcw,
@@ -132,8 +132,8 @@ function SegmentCard({
     <Card
       className={`transition-colors ${
         verified
-          ? 'border-green-300 dark:border-green-800 bg-green-50/30 dark:bg-green-950/10'
-          : 'border-zinc-200 dark:border-zinc-700'
+          ? 'border-[#b9cbaa] bg-[#edf5e8]'
+          : 'ev-card'
       }`}
     >
       <CardHeader className="py-3 px-4">
@@ -142,8 +142,8 @@ function SegmentCard({
             <div
               className={`h-9 w-9 rounded-lg flex items-center justify-center ${
                 verified
-                  ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                  ? 'border border-[#b9cbaa] bg-[#edf5e8] text-[#47644a]'
+                  : 'ev-icon-box'
               }`}
             >
               <Icon className="h-5 w-5" />
@@ -154,10 +154,10 @@ function SegmentCard({
                 {tooltip}
               </CardTitle>
               <div className="flex items-baseline gap-2 mt-0.5">
-                <span className="text-2xl font-bold text-zinc-900 dark:text-white">
+                <span className="text-2xl font-bold text-[var(--takeoff-ink)]">
                   {heroValue}
                 </span>
-                <span className="text-sm text-zinc-500">{heroLabel}</span>
+                <span className="text-sm text-[var(--takeoff-text-muted)]">{heroLabel}</span>
               </div>
             </div>
           </div>
@@ -178,8 +178,8 @@ function SegmentCard({
               onClick={onToggleVerify}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm font-medium transition-colors ${
                 verified
-                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50'
-                  : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                  ? 'border border-[#b9cbaa] bg-[#edf5e8] text-[#47644a] hover:bg-[#e2efda]'
+                  : 'border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] text-[var(--takeoff-text-muted)] hover:bg-white hover:text-[var(--takeoff-ink)]'
               }`}
             >
               {verified ? (
@@ -201,12 +201,10 @@ function SegmentCard({
 
 interface ActiveRunBannerProps {
   activeMode: ActiveMode;
-  onSwitch: (mode: ActiveMode) => void;
   hasOcr: boolean;
   hasVision: boolean;
   envelope: TakeoffEnvelopeV1 | null;
   ocrRun: ExtractionRun | null;
-  visionRun: ExtractionRun | null;
   resolution: ModeResolution | null;
   onRerunPage?: (pageIndex: number) => void;
   isRerunning?: boolean;
@@ -215,18 +213,16 @@ interface ActiveRunBannerProps {
 
 function ActiveRunBanner({
   activeMode,
-  onSwitch,
   hasOcr,
   hasVision,
   envelope,
   ocrRun,
-  visionRun,
   resolution,
   onRerunPage,
   isRerunning,
   planPreset,
 }: ActiveRunBannerProps) {
-  const activeRun = activeMode === 'ocr' ? ocrRun : visionRun;
+  const activeRun = activeMode === 'ocr' ? ocrRun : null;
 
   // Build "why review" reasons from envelope
   const reviewReasons: string[] = [];
@@ -264,47 +260,21 @@ function ActiveRunBanner({
   }
 
   return (
-    <div className="bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 space-y-2">
-      {/* Mode switcher */}
+    <div className="ev-card space-y-2 rounded-[18px] px-4 py-3">
+      {/* Active source indicator */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Activity className="h-4 w-4 text-cyan-400" />
-          <span className="text-sm font-semibold text-zinc-200">Active Run</span>
+          <Activity className="h-4 w-4 text-[var(--takeoff-accent)]" />
+          <span className="text-sm font-semibold text-[var(--takeoff-ink)]">Active Run</span>
         </div>
-        <div className="flex items-center gap-1 bg-zinc-800 rounded-lg p-0.5">
-          <button
-            onClick={() => hasOcr && onSwitch('ocr')}
-            disabled={!hasOcr}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              activeMode === 'ocr'
-                ? 'bg-cyan-600 text-white'
-                : hasOcr
-                  ? 'text-zinc-400 hover:text-zinc-200'
-                  : 'text-zinc-600 cursor-not-allowed'
-            }`}
-          >
-            <Scan className="h-3 w-3" />
-            OCR
-          </button>
-          <button
-            onClick={() => hasVision && onSwitch('vision')}
-            disabled={!hasVision}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              activeMode === 'vision'
-                ? 'bg-purple-600 text-white'
-                : hasVision
-                  ? 'text-zinc-400 hover:text-zinc-200'
-                  : 'text-zinc-600 cursor-not-allowed'
-            }`}
-          >
-            <Eye className="h-3 w-3" />
-            Vision
-          </button>
+        <div className="flex items-center gap-1.5 rounded-full border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-3 py-1.5 text-xs font-medium text-[var(--takeoff-ink)]">
+          <Scan className="h-3 w-3" />
+          {activeMode === 'ocr' ? 'Automated takeoff' : 'Manual / saved takeoff'}
         </div>
       </div>
 
       {/* Debug info */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500 font-mono">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-[var(--takeoff-text-muted)]">
         {activeMode === 'ocr' && envelope && (
           <>
             <span>run_id: {envelope.run_id?.slice(0, 8) || '—'}</span>
@@ -315,17 +285,7 @@ function ActiveRunBanner({
             }>{envelope.status}</span></span>
             <span>confidence: {Math.round(envelope.telemetry.overall_confidence * 100)}%</span>
             <span>page: {envelope.page_selection?.selected_page_index ?? '—'} ({envelope.page_selection?.source})</span>
-            <span>preset: <span className="text-cyan-400">{planPreset || 'auto'}</span></span>
-          </>
-        )}
-        {activeMode === 'vision' && visionRun && (
-          <>
-            <span>run_id: {visionRun.id?.slice(0, 8) || '—'}</span>
-            <span>mode: vision</span>
-            <span>status: <span className={
-              visionRun.status === 'complete' ? 'text-green-400' :
-              visionRun.status === 'review' ? 'text-amber-400' : 'text-red-400'
-            }>{visionRun.status}</span></span>
+            <span>preset: <span className="text-[var(--takeoff-ink)]">{planPreset || 'auto'}</span></span>
           </>
         )}
         {activeRun?.finished_at && (
@@ -368,9 +328,9 @@ function ActiveRunBanner({
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-semibold text-amber-300">Stale OCR Result</p>
+              <p className="text-sm font-semibold text-amber-300">Stale Automated Takeoff</p>
               <p className="text-xs text-amber-400/80 mt-0.5">
-                The most recent OCR run <span className="font-medium text-red-400">failed</span>
+                The most recent automated takeoff run <span className="font-medium text-red-400">failed</span>
                 {resolution.failedRun?.finished_at
                   ? ` at ${new Date(resolution.failedRun.finished_at).toLocaleString()}`
                   : ''}. The data below is from an older successful run.
@@ -378,7 +338,7 @@ function ActiveRunBanner({
             </div>
           </div>
           <p className="text-[11px] text-amber-500/70 italic">
-            Values may not reflect your latest document. Re-run extraction or switch to Vision mode.
+            Values may not reflect your latest document. Re-run automated takeoff when the source file changes.
           </p>
         </div>
       )}
@@ -399,8 +359,7 @@ function ActiveRunBanner({
       {/* Data source warning */}
       {hasOcr && hasVision && !resolution?.staleEnvelope && (
         <p className="text-[11px] text-amber-400/80">
-          Both OCR and Vision runs exist. Showing data from {activeMode === 'ocr' ? 'OCR envelope' : 'Vision rooms/openings'} only.
-          Switch above to compare.
+          Saved room/opening data also exists. The old extracted-data switcher is hidden while automated takeoff is the active workflow.
         </p>
       )}
 
@@ -451,10 +410,10 @@ function ActiveRunBanner({
             ))}
           </div>
           {isRerunning && (
-            <div className="flex items-center gap-2 text-xs text-cyan-400">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Re-running OCR on selected page...
-            </div>
+              <div className="flex items-center gap-2 text-xs text-cyan-400">
+                <Loader2 className="h-3 w-3 animate-spin" />
+              Re-running automated takeoff on selected page...
+              </div>
           )}
         </div>
       )}
@@ -480,7 +439,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const [envelopeSource, setEnvelopeSource] = useState<'run' | 'document' | null>(null);
   const [isRerunning, setIsRerunning] = useState(false);
 
-  // Active run tracking — prevents mixing OCR and Vision data
+  // Active run tracking — prevents mixing automated and saved measurement data
   const [activeMode, setActiveMode] = useState<ActiveMode>(null);
   const [extractionRuns, setExtractionRuns] = useState<ExtractionRun[]>([]);
   const [modeResolution, setModeResolution] = useState<ModeResolution | null>(null);
@@ -529,10 +488,12 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
   const loadData = async () => {
     try {
+      const companyId = await getActiveCompanyId();
       const { data: projectData } = await supabase
         .from('projects')
         .select('*')
         .eq('id', id)
+        .eq('company_id', companyId)
         .single();
 
       setProject(projectData);
@@ -541,6 +502,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
         .from('rooms')
         .select('*')
         .eq('project_id', id)
+        .eq('company_id', companyId)
         .order('created_at', { ascending: true });
 
       console.log('Rooms loaded:', roomsData);
@@ -550,6 +512,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
         .from('openings')
         .select('*')
         .eq('project_id', id)
+        .eq('company_id', companyId)
         .order('created_at', { ascending: true });
 
       console.log('Openings loaded:', openingsData);
@@ -560,6 +523,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
         .from('extraction_runs')
         .select('id, mode, status, attempt, started_at, finished_at, error, takeoff_envelope')
         .eq('project_id', id)
+        .eq('company_id', companyId)
         .order('finished_at', { ascending: false });
 
       const runs = (runsData || []) as (ExtractionRun & { takeoff_envelope?: any })[];
@@ -570,6 +534,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
         .from('documents')
         .select('takeoff_envelope')
         .eq('project_id', id)
+        .eq('company_id', companyId)
         .not('takeoff_envelope', 'is', null)
         .order('created_at', { ascending: false })
         .limit(1);
@@ -620,19 +585,6 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
     }
   };
 
-  // Persist active mode to project when user toggles
-  const handleModeSwitch = async (mode: ActiveMode) => {
-    setActiveMode(mode);
-    try {
-      await supabase
-        .from('projects')
-        .update({ active_extraction_mode: mode })
-        .eq('id', id);
-    } catch (error) {
-      console.error('Error persisting active mode:', error);
-    }
-  };
-
   // Re-run OCR on a specific page (user override)
   const handleRerunPage = async (pageIndex: number) => {
     setIsRerunning(true);
@@ -670,9 +622,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
     setIsSaving(true);
     try {
+      const companyId = await getActiveCompanyId();
       const { data, error } = await supabase
         .from('rooms')
         .insert({
+          company_id: companyId,
           project_id: id,
           name: newRoom.name.trim(),
           type: newRoom.type,
@@ -714,10 +668,12 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const handleUpdateRoom = async (roomId: string, updates: Partial<Room>) => {
     setIsSaving(true);
     try {
+      const companyId = await getActiveCompanyId();
       const { error } = await supabase
         .from('rooms')
         .update(updates)
-        .eq('id', roomId);
+        .eq('id', roomId)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
@@ -734,10 +690,12 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
     if (!confirm('Are you sure you want to delete this room?')) return;
 
     try {
+      const companyId = await getActiveCompanyId();
       const { error } = await supabase
         .from('rooms')
         .delete()
-        .eq('id', roomId);
+        .eq('id', roomId)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
@@ -752,10 +710,12 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const handleUpdateOpening = async (openingId: string, updates: Partial<Opening>) => {
     setIsSaving(true);
     try {
+      const companyId = await getActiveCompanyId();
       const { error } = await supabase
         .from('openings')
         .update(updates)
-        .eq('id', openingId);
+        .eq('id', openingId)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
@@ -770,9 +730,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const handleAddOpening = async (type: 'door' | 'window') => {
     setIsSaving(true);
     try {
+      const companyId = await getActiveCompanyId();
       const { data, error } = await supabase
         .from('openings')
         .insert({
+          company_id: companyId,
           project_id: id,
           type,
           label: type === 'door' ? `Door ${doors.length + 1}` : `Window ${windows.length + 1}`,
@@ -798,10 +760,12 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const handleDeleteOpening = async (openingId: string) => {
     setIsSaving(true);
     try {
+      const companyId = await getActiveCompanyId();
       const { error } = await supabase
         .from('openings')
         .delete()
-        .eq('id', openingId);
+        .eq('id', openingId)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
@@ -947,13 +911,12 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   // ─── Active run helpers ──────────────────────────────────
 
   const ocrRun = extractionRuns.find(r => (r.mode === 'ocr' || r.mode === 'hybrid') && (r.status === 'complete' || r.status === 'review')) || null;
-  const visionRun = extractionRuns.find(r => r.mode === 'vision' && r.status === 'complete') || null;
   const hasOcrData = !!envelope;
   const hasVisionData = rooms.length > 0;
 
   // ─── Derived calculations ─────────────────────────────────
 
-  // Vision-sourced values (used when activeMode === 'vision' or as fallback)
+  // Saved room/opening values (used when activeMode is not automated takeoff)
   const mainRoom = rooms.find(r => r.type === 'living' && r.wall_sf);
   const visionGrossWallSF = mainRoom?.wall_sf || 0;
   const visionFloorSF = mainRoom?.floor_sf || 0;
@@ -984,9 +947,8 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const ocrTotalDoorSF = ocrDoorItems.reduce((sum, d) => sum + (d.area_sf || 0), 0);
   const ocrTotalWindowSF = ocrWindowItems.reduce((sum, w) => sum + (w.area_sf || 0), 0);
 
-  // Active-mode derived values — render from one source only
-  // IMPORTANT: when activeMode is null (not yet resolved), default to Vision
-  // to avoid showing zeros. Once loadData resolves, this re-renders.
+  // Active-mode derived values — render from one source only.
+  // When activeMode is null during load, use saved room/opening values to avoid showing zeros.
   const isOcrActive = activeMode === 'ocr';
   const grossWallSF = isOcrActive ? ocrGrossWallSF : visionGrossWallSF;
   const netWallSF = isOcrActive ? ocrNetWallSF : visionNetWallSF;
@@ -1000,7 +962,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   const wallHeightFt = isOcrActive ? 0 : visionWallHeightFt;
 
   // Data source diagnostic — proves no mixing
-  const dataSource = isOcrActive ? 'envelope' : 'vision';
+  const dataSource = isOcrActive ? 'envelope' : 'manual';
 
   // Build the list of visible segments for progress tracking
   const segmentIds: string[] = ['walls', 'doors', 'windows', 'ceiling'];
@@ -1015,7 +977,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="takeoff-shell takeoff-light-theme flex h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
@@ -1023,8 +985,8 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
   if (!project) {
     return (
-      <div className="p-8">
-        <p className="text-zinc-500">Project not found</p>
+      <div className="takeoff-shell takeoff-light-theme min-h-screen p-8">
+        <p className="text-[var(--takeoff-text-muted)]">Project not found</p>
       </div>
     );
   }
@@ -1034,13 +996,14 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
   // ─── Render ───────────────────────────────────────────────
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="takeoff-shell takeoff-light-theme flex h-screen flex-col text-[var(--takeoff-ink)]">
       {/* Header */}
-      <div className="border-b px-4 py-3 bg-white dark:bg-zinc-900">
-        <div className="container mx-auto flex items-center justify-between">
+      <div className="border-b border-[var(--takeoff-line)] bg-[rgba(255,255,255,0.84)] px-4 py-3 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-[1480px] items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">{project.name}</h1>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            <p className="ev-label">Review Workspace</p>
+            <h1 className="ev-title mt-1 text-2xl">{project.name}</h1>
+            <p className="ev-muted text-sm">
               {project.status === 'manual'
                 ? 'Add and manage room measurements'
                 : 'Review and verify extracted measurements'}
@@ -1054,7 +1017,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
               <Button
                 className={
                   allVerified
-                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    ? 'border-[#47644a] bg-[#47644a] text-white hover:bg-[#355239]'
                     : ''
                 }
               >
@@ -1073,11 +1036,11 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
 
       {/* Main Content */}
       <div className="flex-1 overflow-hidden">
-        <div className="container mx-auto h-full p-4">
+        <div className="mx-auto h-full max-w-[1480px] p-4">
           <div className={`grid gap-4 h-full ${hasPdf ? 'grid-cols-2' : 'grid-cols-1 max-w-3xl mx-auto'}`}>
             {/* PDF Viewer */}
             {hasPdf && (
-              <Card className="overflow-hidden flex flex-col">
+              <Card className="ev-card flex flex-col overflow-hidden">
                 <CardHeader className="py-3">
                   <CardTitle className="text-lg">Source Document</CardTitle>
                 </CardHeader>
@@ -1093,12 +1056,10 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
               {(hasOcrData || hasVisionData) && activeMode && (
                 <ActiveRunBanner
                   activeMode={activeMode}
-                  onSwitch={handleModeSwitch}
                   hasOcr={hasOcrData}
                   hasVision={hasVisionData}
                   envelope={envelope}
                   ocrRun={ocrRun}
-                  visionRun={visionRun}
                   resolution={modeResolution}
                   onRerunPage={handleRerunPage}
                   isRerunning={isRerunning}
@@ -1119,20 +1080,20 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
               />
 
               {/* Progress Bar */}
-              <div className="bg-white dark:bg-zinc-900 border rounded-lg px-4 py-3 flex items-center gap-4">
+              <div className="ev-card flex items-center gap-4 rounded-[18px] px-4 py-3">
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    <span className="text-sm font-medium text-[var(--takeoff-ink)]">
                       Verification Progress
                     </span>
-                    <span className="text-sm text-zinc-500">
+                    <span className="text-sm text-[var(--takeoff-text-muted)]">
                       {verifiedCount} of {totalSegments} segments verified
                     </span>
                   </div>
-                  <div className="w-full bg-zinc-200 dark:bg-zinc-700 rounded-full h-2">
+                  <div className="h-2 w-full rounded-full bg-[var(--takeoff-paper)]">
                     <div
                       className={`h-2 rounded-full transition-all ${
-                        allVerified ? 'bg-green-500' : 'bg-cyan-500'
+                        allVerified ? 'bg-[#6f8b5e]' : 'bg-[var(--takeoff-ink)]'
                       }`}
                       style={{ width: `${totalSegments > 0 ? (verifiedCount / totalSegments) * 100 : 0}%` }}
                     />
@@ -1169,10 +1130,10 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                   {' | '}envelopeSource = <span className="text-yellow-300">{JSON.stringify(envelopeSource)}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-zinc-400 mt-1">
-                  <div>source_walls = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (gross=${ocrGrossWallSF}, net=${ocrNetWallSF})` : `vision (gross=${visionGrossWallSF})`}</span></div>
-                  <div>source_doors = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrDoorItems.length} items, ${ocrTotalDoorSF} sf)` : `vision (${doors.length} items, ${visionTotalDoorSF} sf)`}</span></div>
-                  <div>source_windows = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrWindowItems.length} items, ${ocrTotalWindowSF} sf)` : `vision (${windows.length} items, ${visionTotalWindowSF} sf)`}</span></div>
-                  <div>source_net = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrNetWallSF} sf)` : `vision (${visionNetWallSF} sf)`}</span></div>
+                  <div>source_walls = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (gross=${ocrGrossWallSF}, net=${ocrNetWallSF})` : `manual (gross=${visionGrossWallSF})`}</span></div>
+                  <div>source_doors = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrDoorItems.length} items, ${ocrTotalDoorSF} sf)` : `manual (${doors.length} items, ${visionTotalDoorSF} sf)`}</span></div>
+                  <div>source_windows = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrWindowItems.length} items, ${ocrTotalWindowSF} sf)` : `manual (${windows.length} items, ${visionTotalWindowSF} sf)`}</span></div>
+                  <div>source_net = <span className={isOcrActive ? 'text-cyan-400' : 'text-purple-400'}>{isOcrActive ? `envelope (${ocrNetWallSF} sf)` : `manual (${visionNetWallSF} sf)`}</span></div>
                   <div>rendered_gross = <span className="text-white">{grossWallSF}</span></div>
                   <div>rendered_net = <span className="text-white">{netWallSF}</span></div>
                   <div>rendered_doors = <span className="text-white">{totalDoorSF}</span></div>
@@ -1323,7 +1284,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                           ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300'
                           : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
                       }`}>
-                        Source: {activeMode === 'ocr' ? 'OCR Pipeline' : 'Vision / Manual'}
+                        Source: {activeMode === 'ocr' ? 'Automated Takeoff' : 'Manual / Saved Measurements'}
                       </span>
                       {studSize && (
                         <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
@@ -1739,7 +1700,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                     </div>
                     <p className="text-xs text-zinc-400">
                       {activeMode === 'ocr'
-                        ? 'Source: OCR Pipeline (estimated from footprint)'
+                        ? 'Source: Automated takeoff (estimated from footprint)'
                         : mainRoom
                           ? `Source: ${mainRoom.name} (living area footprint)`
                           : 'No living room data available — add a room first'}

@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { requireServerCompanyId } from '@/lib/supabase/company-server';
+
+const PROJECT_STATUSES = ['uploaded', 'extracting', 'reviewing', 'completed', 'manual'] as const;
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { name, clientId } = body;
-
-    console.log('Creating project with:', { name, clientId, status: body.status });
+    const companyId = await requireServerCompanyId();
 
     if (!name) {
       return NextResponse.json(
@@ -15,15 +17,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (body.status !== undefined && !PROJECT_STATUSES.includes(body.status)) {
+      return NextResponse.json(
+        { error: 'Invalid project status' },
+        { status: 400 }
+      );
+    }
+
+    if (clientId) {
+      const { data: client, error: clientError } = await supabaseAdmin
+        .from('clients')
+        .select('id')
+        .eq('id', clientId)
+        .eq('company_id', companyId)
+        .single();
+
+      if (clientError || !client) {
+        return NextResponse.json(
+          { error: 'Client not found' },
+          { status: 404 }
+        );
+      }
+    }
+
     // Create project record
     // Use 'reviewing' as default status (database constraint doesn't allow 'manual')
     const insertData = {
       name: name.trim(),
+      company_id: companyId,
       pdf_url: '',
       status: body.status || 'reviewing',
       client_id: clientId || null,
     };
-    console.log('Insert data:', insertData);
 
     const { data: project, error: projectError } = await supabaseAdmin
       .from('projects')

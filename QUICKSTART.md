@@ -61,13 +61,13 @@ Edit the `.env.local` file in the project root:
 NEXT_PUBLIC_SUPABASE_URL="https://xxxxx.supabase.co"
 
 # Paste your Supabase anon key
-NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhb..."
+NEXT_PUBLIC_SUPABASE_ANON_KEY="<your-supabase-anon-key>"
 
 # Paste your Supabase service_role key
-SUPABASE_SERVICE_ROLE_KEY="eyJhb..."
+SUPABASE_SERVICE_ROLE_KEY="<your-supabase-service-role-key>"
 
 # Paste your Anthropic API key
-ANTHROPIC_API_KEY="sk-ant-..."
+ANTHROPIC_API_KEY="<your-anthropic-api-key>"
 
 # Leave these as-is
 NEXT_PUBLIC_APP_URL="http://localhost:3000"

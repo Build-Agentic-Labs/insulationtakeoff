@@ -9,9 +9,149 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      companies: {
+        Row: {
+          id: string
+          name: string
+          legal_name: string | null
+          logo_url: string | null
+          address: string | null
+          phone: string | null
+          email: string | null
+          website: string | null
+          license_number: string | null
+          quote_terms: string | null
+          quote_footer: string | null
+          default_tax_rate: number
+          onboarding_completed: boolean
+          onboarding_completed_at: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          legal_name?: string | null
+          logo_url?: string | null
+          address?: string | null
+          phone?: string | null
+          email?: string | null
+          website?: string | null
+          license_number?: string | null
+          quote_terms?: string | null
+          quote_footer?: string | null
+          default_tax_rate?: number
+          onboarding_completed?: boolean
+          onboarding_completed_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          legal_name?: string | null
+          logo_url?: string | null
+          address?: string | null
+          phone?: string | null
+          email?: string | null
+          website?: string | null
+          license_number?: string | null
+          quote_terms?: string | null
+          quote_footer?: string | null
+          default_tax_rate?: number
+          onboarding_completed?: boolean
+          onboarding_completed_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      company_members: {
+        Row: {
+          id: string
+          company_id: string
+          user_id: string
+          role: 'owner' | 'admin' | 'member'
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          user_id: string
+          role?: 'owner' | 'admin' | 'member'
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          user_id?: string
+          role?: 'owner' | 'admin' | 'member'
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_members_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      company_invitations: {
+        Row: {
+          id: string
+          company_id: string
+          email: string
+          role: 'admin' | 'member'
+          token: string
+          invited_by: string | null
+          accepted_by: string | null
+          accepted_at: string | null
+          expires_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          email: string
+          role?: 'admin' | 'member'
+          token?: string
+          invited_by?: string | null
+          accepted_by?: string | null
+          accepted_at?: string | null
+          expires_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          email?: string
+          role?: 'admin' | 'member'
+          token?: string
+          invited_by?: string | null
+          accepted_by?: string | null
+          accepted_at?: string | null
+          expires_at?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_invitations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       projects: {
         Row: {
           id: string
+          company_id: string
           name: string
           pdf_url: string | null
           status: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'
@@ -23,6 +163,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          company_id?: string
           name: string
           pdf_url?: string | null
           status?: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'
@@ -34,6 +175,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          company_id?: string
           name?: string
           pdf_url?: string | null
           status?: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'
@@ -56,6 +198,7 @@ export interface Database {
       clients: {
         Row: {
           id: string
+          company_id: string
           name: string
           email: string | null
           phone: string | null
@@ -66,6 +209,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          company_id?: string
           name: string
           email?: string | null
           phone?: string | null
@@ -76,6 +220,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          company_id?: string
           name?: string
           email?: string | null
           phone?: string | null
@@ -89,6 +234,7 @@ export interface Database {
       documents: {
         Row: {
           id: string
+          company_id: string
           project_id: string
           name: string
           file_url: string
@@ -99,6 +245,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          company_id?: string
           project_id: string
           name: string
           file_url: string
@@ -109,6 +256,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          company_id?: string
           project_id?: string
           name?: string
           file_url?: string
@@ -130,6 +278,7 @@ export interface Database {
       rooms: {
         Row: {
           id: string
+          company_id: string
           project_id: string
           name: string
           type: 'living' | 'garage' | 'attic' | 'crawlspace'
@@ -145,6 +294,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          company_id?: string
           project_id: string
           name: string
           type: 'living' | 'garage' | 'attic' | 'crawlspace'
@@ -160,6 +310,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          company_id?: string
           project_id?: string
           name?: string
           type?: 'living' | 'garage' | 'attic' | 'crawlspace'
@@ -186,6 +337,7 @@ export interface Database {
       openings: {
         Row: {
           id: string
+          company_id: string
           project_id: string
           type: 'door' | 'window'
           label: string
@@ -198,6 +350,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          company_id?: string
           project_id: string
           type: 'door' | 'window'
           label?: string
@@ -210,6 +363,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          company_id?: string
           project_id?: string
           type?: 'door' | 'window'
           label?: string
@@ -233,6 +387,7 @@ export interface Database {
       measurements: {
         Row: {
           id: string
+          company_id: string
           room_id: string
           field: string
           extracted_value: number | null
@@ -244,6 +399,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          company_id?: string
           room_id: string
           field: string
           extracted_value?: number | null
@@ -255,6 +411,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          company_id?: string
           room_id?: string
           field?: string
           extracted_value?: number | null
@@ -277,26 +434,32 @@ export interface Database {
       quotes: {
         Row: {
           id: string
+          company_id: string
           project_id: string
           line_items: Json
           total_cost: number
           pdf_url: string | null
+          idempotency_key: string | null
           created_at: string
         }
         Insert: {
           id?: string
+          company_id?: string
           project_id: string
           line_items: Json
           total_cost: number
           pdf_url?: string | null
+          idempotency_key?: string | null
           created_at?: string
         }
         Update: {
           id?: string
+          company_id?: string
           project_id?: string
           line_items?: Json
           total_cost?: number
           pdf_url?: string | null
+          idempotency_key?: string | null
           created_at?: string
         }
         Relationships: [
@@ -312,6 +475,7 @@ export interface Database {
       extraction_runs: {
         Row: {
           id: string
+          company_id: string
           project_id: string
           document_id: string
           mode: 'ocr' | 'vision' | 'hybrid'
@@ -329,6 +493,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          company_id?: string
           project_id: string
           document_id: string
           mode: 'ocr' | 'vision' | 'hybrid'
@@ -346,6 +511,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          company_id?: string
           project_id?: string
           document_id?: string
           mode?: 'ocr' | 'vision' | 'hybrid'
@@ -381,18 +547,21 @@ export interface Database {
       settings: {
         Row: {
           id: string
+          company_id: string
           key: string
           value: Json
           updated_at: string
         }
         Insert: {
           id?: string
+          company_id?: string
           key: string
           value: Json
           updated_at?: string
         }
         Update: {
           id?: string
+          company_id?: string
           key?: string
           value?: Json
           updated_at?: string
@@ -402,28 +571,103 @@ export interface Database {
       takeoff_sessions: {
         Row: {
           id: string
+          company_id: string
           project_id: string
           document_id: string
-          status: 'in_progress' | 'completed' | 'abandoned'
+          status:
+            | 'in_progress'
+            | 'calibrating'
+            | 'tracing'
+            | 'reviewing'
+            | 'completed'
+            | 'abandoned'
           selected_pages: number[]
+          measurement_basis: string
+          calibrations: Json
+          traces: Json
+          classifications: Json
+          window_catalog: Json
+          door_catalog: Json
+          workspace_schema_version: number
+          page_analysis: Json
+          views: Json
+          zones: Json
+          wall_runs: Json
+          surfaces: Json
+          opening_items: Json
+          completion_checklist: Json
+          ai_suggestions: Json
+          viewer_state: Json
+          workspace_summary: Json
+          estimate_rows: Json
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
+          company_id?: string
           project_id: string
           document_id: string
-          status?: 'in_progress' | 'completed' | 'abandoned'
+          status?:
+            | 'in_progress'
+            | 'calibrating'
+            | 'tracing'
+            | 'reviewing'
+            | 'completed'
+            | 'abandoned'
           selected_pages?: number[]
+          measurement_basis?: string
+          calibrations?: Json
+          traces?: Json
+          classifications?: Json
+          window_catalog?: Json
+          door_catalog?: Json
+          workspace_schema_version?: number
+          page_analysis?: Json
+          views?: Json
+          zones?: Json
+          wall_runs?: Json
+          surfaces?: Json
+          opening_items?: Json
+          completion_checklist?: Json
+          ai_suggestions?: Json
+          viewer_state?: Json
+          workspace_summary?: Json
+          estimate_rows?: Json
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
+          company_id?: string
           project_id?: string
           document_id?: string
-          status?: 'in_progress' | 'completed' | 'abandoned'
+          status?:
+            | 'in_progress'
+            | 'calibrating'
+            | 'tracing'
+            | 'reviewing'
+            | 'completed'
+            | 'abandoned'
           selected_pages?: number[]
+          measurement_basis?: string
+          calibrations?: Json
+          traces?: Json
+          classifications?: Json
+          window_catalog?: Json
+          door_catalog?: Json
+          workspace_schema_version?: number
+          page_analysis?: Json
+          views?: Json
+          zones?: Json
+          wall_runs?: Json
+          surfaces?: Json
+          opening_items?: Json
+          completion_checklist?: Json
+          ai_suggestions?: Json
+          viewer_state?: Json
+          workspace_summary?: Json
+          estimate_rows?: Json
           created_at?: string
           updated_at?: string
         }
@@ -447,6 +691,7 @@ export interface Database {
       takeoff_regions: {
         Row: {
           id: string
+          company_id: string
           session_id: string
           page_index: number
           label: string
@@ -465,6 +710,7 @@ export interface Database {
         }
         Insert: {
           id?: string
+          company_id?: string
           session_id: string
           page_index: number
           label: string
@@ -483,6 +729,7 @@ export interface Database {
         }
         Update: {
           id?: string
+          company_id?: string
           session_id?: string
           page_index?: number
           label?: string

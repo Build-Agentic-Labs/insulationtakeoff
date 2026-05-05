@@ -4,6 +4,7 @@ import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -59,11 +60,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   const loadData = async () => {
     try {
+      const companyId = await getActiveCompanyId();
       // Load client
       const { data: clientData, error: clientError } = await supabase
         .from('clients')
         .select('*')
         .eq('id', id)
+        .eq('company_id', companyId)
         .single();
 
       if (clientError) throw clientError;
@@ -74,6 +77,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       const { data: projectsData, error: projectsError } = await supabase
         .from('projects')
         .select('*')
+        .eq('company_id', companyId)
         .eq('client_id', id)
         .order('created_at', { ascending: false });
 
@@ -91,6 +95,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
     setIsSaving(true);
     try {
+      const companyId = await getActiveCompanyId();
       const { error } = await supabase
         .from('clients')
         .update({
@@ -101,7 +106,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           notes: editForm.notes,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', id);
+        .eq('id', id)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
@@ -120,10 +126,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     }
 
     try {
+      const companyId = await getActiveCompanyId();
       const { error } = await supabase
         .from('clients')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('company_id', companyId);
 
       if (error) throw error;
 
@@ -136,11 +144,11 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
-        return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+        return 'ev-status-completed';
       case 'extracted':
-        return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+        return 'ev-status-extracted';
       default:
-        return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400';
+        return 'ev-status-default';
     }
   };
 
@@ -154,19 +162,22 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   if (!client) {
     return (
-      <div className="p-8">
-        <p className="text-zinc-500">Client not found</p>
+      <div className="ev-page ev-page-grid min-h-screen">
+        <div className="ev-container">
+          <p className="text-[var(--takeoff-text-muted)]">Client not found</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-8">
+    <div className="ev-page ev-page-grid min-h-screen">
+      <div className="ev-container">
       {/* Header */}
       <div className="mb-8">
         <Link
           href="/clients"
-          className="inline-flex items-center gap-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors mb-4"
+          className="ev-secondary-action mb-4 inline-flex items-center gap-2 rounded-[12px] px-4 py-2 text-[11px] font-semibold transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Clients
@@ -174,12 +185,13 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
-            <div className="h-16 w-16 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Building2 className="h-8 w-8 text-primary" />
+            <div className="ev-icon-box h-16 w-16 rounded-[22px]">
+              <Building2 className="h-8 w-8" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-zinc-900 dark:text-white">{client.name}</h1>
-              <p className="text-zinc-500 dark:text-zinc-400 mt-1">
+              <p className="ev-label">Client Record</p>
+              <h1 className="ev-title mt-1 text-[42px]">{client.name}</h1>
+              <p className="ev-muted mt-2 text-sm">
                 Client since {new Date(client.created_at).toLocaleDateString()}
               </p>
             </div>
@@ -197,7 +209,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               variant="outline"
               size="sm"
               onClick={handleDelete}
-              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              className="text-[var(--takeoff-accent)] hover:bg-[#fff5f5] hover:text-[var(--takeoff-accent)]"
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -208,7 +220,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Client Info */}
         <div className="lg:col-span-1">
-          <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
+          <Card className="ev-card">
             <CardHeader>
               <CardTitle className="text-lg">Client Details</CardTitle>
             </CardHeader>
@@ -220,7 +232,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     <Input
                       value={editForm?.name || ''}
                       onChange={(e) => setEditForm({ ...editForm!, name: e.target.value })}
-                      className="bg-zinc-50 dark:bg-zinc-900"
+                      className="ev-input"
                     />
                   </div>
                   <div className="space-y-2">
@@ -229,7 +241,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       type="email"
                       value={editForm?.email || ''}
                       onChange={(e) => setEditForm({ ...editForm!, email: e.target.value })}
-                      className="bg-zinc-50 dark:bg-zinc-900"
+                      className="ev-input"
                     />
                   </div>
                   <div className="space-y-2">
@@ -237,7 +249,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     <Input
                       value={editForm?.phone || ''}
                       onChange={(e) => setEditForm({ ...editForm!, phone: e.target.value })}
-                      className="bg-zinc-50 dark:bg-zinc-900"
+                      className="ev-input"
                     />
                   </div>
                   <div className="space-y-2">
@@ -245,7 +257,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     <Input
                       value={editForm?.address || ''}
                       onChange={(e) => setEditForm({ ...editForm!, address: e.target.value })}
-                      className="bg-zinc-50 dark:bg-zinc-900"
+                      className="ev-input"
                     />
                   </div>
                   <div className="space-y-2">
@@ -254,7 +266,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       value={editForm?.notes || ''}
                       onChange={(e) => setEditForm({ ...editForm!, notes: e.target.value })}
                       rows={3}
-                      className="w-full px-3 py-2 rounded-md border bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-sm"
+                      className="ev-input w-full rounded-[18px] border px-3 py-2 text-sm"
                     />
                   </div>
                   <div className="flex gap-2 pt-2">
@@ -279,7 +291,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 <div className="space-y-4">
                   {client.email && (
                     <div className="flex items-center gap-3">
-                      <Mail className="h-4 w-4 text-zinc-400" />
+                      <Mail className="h-4 w-4 text-[var(--takeoff-text-subtle)]" />
                       <a href={`mailto:${client.email}`} className="text-sm hover:text-primary transition-colors">
                         {client.email}
                       </a>
@@ -287,7 +299,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   )}
                   {client.phone && (
                     <div className="flex items-center gap-3">
-                      <Phone className="h-4 w-4 text-zinc-400" />
+                      <Phone className="h-4 w-4 text-[var(--takeoff-text-subtle)]" />
                       <a href={`tel:${client.phone}`} className="text-sm hover:text-primary transition-colors">
                         {client.phone}
                       </a>
@@ -295,17 +307,17 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   )}
                   {client.address && (
                     <div className="flex items-start gap-3">
-                      <MapPin className="h-4 w-4 text-zinc-400 mt-0.5" />
-                      <span className="text-sm text-zinc-600 dark:text-zinc-300">{client.address}</span>
+                      <MapPin className="mt-0.5 h-4 w-4 text-[var(--takeoff-text-subtle)]" />
+                      <span className="text-sm text-[var(--takeoff-text-muted)]">{client.address}</span>
                     </div>
                   )}
                   {client.notes && (
-                    <div className="pt-4 border-t border-zinc-100 dark:border-zinc-700">
-                      <p className="text-sm text-zinc-500 dark:text-zinc-400 italic">{client.notes}</p>
+                    <div className="border-t border-[var(--takeoff-line)] pt-4">
+                      <p className="text-sm italic text-[var(--takeoff-text-muted)]">{client.notes}</p>
                     </div>
                   )}
                   {!client.email && !client.phone && !client.address && !client.notes && (
-                    <p className="text-sm text-zinc-400">No contact details added</p>
+                    <p className="text-sm text-[var(--takeoff-text-subtle)]">No contact details added</p>
                   )}
                 </div>
               )}
@@ -315,7 +327,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
         {/* Projects */}
         <div className="lg:col-span-2">
-          <Card className="border-zinc-200 dark:border-zinc-700 shadow-sm">
+          <Card className="ev-card">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="text-lg">Projects</CardTitle>
@@ -331,11 +343,11 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             <CardContent>
               {projects.length === 0 ? (
                 <div className="text-center py-12">
-                  <FolderOpen className="h-12 w-12 mx-auto text-zinc-300 dark:text-zinc-600 mb-4" />
-                  <h3 className="text-lg font-semibold text-zinc-900 dark:text-white mb-2">
+                  <FolderOpen className="mx-auto mb-4 h-12 w-12 text-[var(--takeoff-text-subtle)]" />
+                  <h3 className="mb-2 text-lg font-semibold text-[var(--takeoff-ink)]">
                     No projects yet
                   </h3>
-                  <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+                  <p className="ev-muted mb-6">
                     Create the first project for this client
                   </p>
                   <Link href={`/projects/new?clientId=${id}`}>
@@ -354,25 +366,31 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       className="group block"
                       style={{ animationDelay: `${index * 50}ms` }}
                     >
-                      <div className="flex items-center justify-between p-4 rounded-lg border border-zinc-100 dark:border-zinc-700 hover:border-primary hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-all duration-200">
+                      <div className="ev-card-hover flex items-center justify-between rounded-[18px] border border-[var(--takeoff-line)] bg-white p-4 transition-all duration-200">
                         <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-                            <FileText className="h-5 w-5 text-red-600 dark:text-red-400" />
+                          <div className="ev-icon-box h-10 w-10 rounded-[14px]">
+                            <FileText className="h-5 w-5 text-[var(--takeoff-accent)]" />
                           </div>
                           <div>
-                            <h4 className="font-medium text-zinc-900 dark:text-white group-hover:text-primary transition-colors">
+                            <h4 className="font-medium text-[var(--takeoff-ink)] transition-colors group-hover:text-[var(--takeoff-accent)]">
                               {project.name}
                             </h4>
-                            <p className="text-sm text-zinc-500">
-                              {new Date(project.created_at).toLocaleDateString()}
+                            <p className="flex flex-wrap items-center gap-2 text-sm text-[var(--takeoff-text-muted)]">
+                              <span>{new Date(project.created_at).toLocaleDateString()}</span>
+                              {project.pdf_url && (
+                                <span className="inline-flex items-center gap-1 rounded-[10px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-2 py-0.5 text-[11px] font-medium text-[var(--takeoff-ink)]">
+                                  <FileText className="h-3 w-3" />
+                                  Plan attached
+                                </span>
+                              )}
                             </p>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${getStatusColor(project.status)}`}>
+                          <span className={`ev-status ${getStatusColor(project.status)}`}>
                             {project.status}
                           </span>
-                          <ChevronRight className="h-5 w-5 text-zinc-300 dark:text-zinc-600 group-hover:text-primary group-hover:translate-x-1 transition-all duration-200" />
+                          <ChevronRight className="h-5 w-5 text-[var(--takeoff-text-subtle)] transition-all duration-200 group-hover:translate-x-1 group-hover:text-[var(--takeoff-accent)]" />
                         </div>
                       </div>
                     </Link>
@@ -382,6 +400,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </CardContent>
           </Card>
         </div>
+      </div>
       </div>
     </div>
   );

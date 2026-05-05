@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRecentRuns } from '@/lib/supabase/extractionRuns';
+import { requireServerCompanyId } from '@/lib/supabase/company-server';
 
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId');
@@ -9,8 +10,9 @@ export async function GET(request: NextRequest) {
   }
 
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '10', 10);
+  const companyId = await requireServerCompanyId();
 
-  const runs = await getRecentRuns(projectId, Math.min(limit, 50));
+  const runs = await getRecentRuns(companyId, projectId, Math.min(limit, 50));
 
   return NextResponse.json({
     runs: runs.map((r) => ({
