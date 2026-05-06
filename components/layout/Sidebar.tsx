@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { SupportDialog } from '@/components/support/SupportDialog';
 import { supabase } from '@/lib/supabase/client';
 import {
   Users,
@@ -16,6 +17,7 @@ import {
   LogOut,
   UserCircle,
   Building2,
+  Inbox,
 } from 'lucide-react';
 
 interface NavItem {
@@ -50,6 +52,7 @@ export function Sidebar() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState<string>('Workspace');
   const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<'owner' | 'admin' | 'member' | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -61,11 +64,12 @@ export function Sidebar() {
     const loadCompany = async () => {
       const { data: membership } = await supabase
         .from('company_members')
-        .select('company_id')
+        .select('company_id, role')
         .limit(1)
         .maybeSingle();
 
       if (!active || !membership?.company_id) return;
+      setUserRole(membership.role);
 
       const { data: company } = await supabase
         .from('companies')
@@ -102,6 +106,17 @@ export function Sidebar() {
   if (pathname === '/login' || pathname === '/company/setup') {
     return null;
   }
+
+  const visibleNavItems: NavItem[] = userRole === 'owner' || userRole === 'admin'
+    ? [
+      ...navItems,
+      {
+        title: 'Support Inbox',
+        href: '/support',
+        icon: <Inbox className="h-5 w-5" />,
+      },
+    ]
+    : navItems;
 
   return (
     <aside
@@ -171,7 +186,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const isActive = pathname === item.href ||
             (item.href !== '/' && pathname.startsWith(item.href));
 
@@ -231,6 +246,7 @@ export function Sidebar() {
             </div>
           )}
         </div>
+        <SupportDialog collapsed={collapsed} />
         <button
           onClick={handleSignOut}
           className={cn(

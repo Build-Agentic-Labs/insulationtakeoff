@@ -148,6 +148,132 @@ export interface Database {
           }
         ]
       }
+      support_tickets: {
+        Row: {
+          id: string
+          company_id: string
+          user_id: string | null
+          submitter_email: string
+          project_id: string | null
+          subject: string
+          message: string
+          page_url: string | null
+          browser_info: Json
+          status: 'open' | 'in_progress' | 'resolved'
+          notification_status: 'pending' | 'sent' | 'failed' | 'skipped'
+          notification_id: string | null
+          notification_error: string | null
+          notified_at: string | null
+          resolved_by: string | null
+          resolved_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          user_id?: string | null
+          submitter_email: string
+          project_id?: string | null
+          subject: string
+          message: string
+          page_url?: string | null
+          browser_info?: Json
+          status?: 'open' | 'in_progress' | 'resolved'
+          notification_status?: 'pending' | 'sent' | 'failed' | 'skipped'
+          notification_id?: string | null
+          notification_error?: string | null
+          notified_at?: string | null
+          resolved_by?: string | null
+          resolved_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          user_id?: string | null
+          submitter_email?: string
+          project_id?: string | null
+          subject?: string
+          message?: string
+          page_url?: string | null
+          browser_info?: Json
+          status?: 'open' | 'in_progress' | 'resolved'
+          notification_status?: 'pending' | 'sent' | 'failed' | 'skipped'
+          notification_id?: string | null
+          notification_error?: string | null
+          notified_at?: string | null
+          resolved_by?: string | null
+          resolved_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_tickets_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "support_tickets_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      support_ticket_attachments: {
+        Row: {
+          id: string
+          ticket_id: string
+          company_id: string
+          storage_path: string
+          file_name: string
+          file_type: string
+          file_size: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          ticket_id: string
+          company_id: string
+          storage_path: string
+          file_name: string
+          file_type: string
+          file_size: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          ticket_id?: string
+          company_id?: string
+          storage_path?: string
+          file_name?: string
+          file_type?: string
+          file_size?: number
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_ticket_attachments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "support_ticket_attachments_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       projects: {
         Row: {
           id: string

@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { supabaseAdmin } from './server';
 
 export const BUCKET_NAME = 'pdfs';
+export const MAX_SUPPORT_ATTACHMENTS = 5;
+export const MAX_SUPPORT_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
 export const ALLOWED_UPLOAD_TYPES = [
   'application/pdf',
@@ -10,6 +13,8 @@ export const ALLOWED_UPLOAD_TYPES = [
 ] as const;
 
 export const ALLOWED_UPLOAD_EXTENSIONS = ['pdf', 'jpg', 'jpeg', 'png', 'webp'] as const;
+export const ALLOWED_SUPPORT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export const ALLOWED_SUPPORT_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'] as const;
 
 export function getMaxUploadSizeMb(): number {
   const parsed = Number.parseInt(process.env.MAX_PDF_SIZE_MB || '50', 10);
@@ -43,6 +48,45 @@ export function validateUploadFile(file: File): string | null {
 
   if (file.size > getMaxUploadSizeBytes()) {
     return `File size exceeds ${getMaxUploadSizeMb()}MB limit`;
+  }
+
+  return null;
+}
+
+export function safeStorageFileName(fileName: string): string {
+  const safeName = fileName
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 120);
+
+  return safeName || 'attachment';
+}
+
+export function validateSupportAttachment(file: File): string | null {
+  if (!ALLOWED_SUPPORT_IMAGE_TYPES.includes(file.type as (typeof ALLOWED_SUPPORT_IMAGE_TYPES)[number])) {
+    return 'Support screenshots must be JPG, PNG, or WEBP images';
+  }
+
+  if (!ALLOWED_SUPPORT_IMAGE_EXTENSIONS.includes(getFileExtension(file.name) as (typeof ALLOWED_SUPPORT_IMAGE_EXTENSIONS)[number])) {
+    return 'Support screenshots must use a JPG, PNG, or WEBP file extension';
+  }
+
+  if (file.size > MAX_SUPPORT_ATTACHMENT_SIZE_BYTES) {
+    return 'Support screenshots must be 10MB or smaller';
+  }
+
+  return null;
+}
+
+export function validateSupportAttachments(files: File[]): string | null {
+  if (files.length > MAX_SUPPORT_ATTACHMENTS) {
+    return `Attach up to ${MAX_SUPPORT_ATTACHMENTS} screenshots per support request`;
+  }
+
+  for (const file of files) {
+    const error = validateSupportAttachment(file);
+    if (error) return error;
   }
 
   return null;
@@ -117,6 +161,45 @@ export async function createSignedStorageUrl(value: string, companyId: string, e
   }
 
   return data.signedUrl;
+}
+
+export async function uploadSupportAttachment(
+  file: File,
+  companyId: string,
+  ticketId: string,
+  index: number
+): Promise<{
+  storagePath: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}> {
+  const validationError = validateSupportAttachment(file);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const safeName = safeStorageFileName(file.name);
+  const filePath = `companies/${companyId}/support/${ticketId}/${index + 1}-${randomUUID()}-${safeName}`;
+
+  const { error } = await supabaseAdmin.storage
+    .from(BUCKET_NAME)
+    .upload(filePath, file, {
+      cacheControl: '3600',
+      contentType: file.type,
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(`Failed to upload support screenshot: ${error.message}`);
+  }
+
+  return {
+    storagePath: filePath,
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+  };
 }
 
 export async function uploadFile(file: File, projectId: string, companyId?: string): Promise<string> {
