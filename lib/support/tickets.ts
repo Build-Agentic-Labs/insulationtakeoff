@@ -74,23 +74,45 @@ export function htmlToPlainText(html: string) {
   );
 }
 
+function isQuotedEmailBoundary(lines: string[], index: number) {
+  const trimmed = lines[index]?.trim() ?? '';
+
+  if (/^>/.test(trimmed)) return true;
+  if (/^-{2,}\s*Original Message\s*-{2,}$/i.test(trimmed)) return true;
+  if (/^-{2,}\s*Forwarded message\s*-{2,}$/i.test(trimmed)) return true;
+  if (/^_{5,}$/.test(trimmed)) return true;
+  if (/^From:\s/i.test(trimmed)) return true;
+  if (/^Sent:\s/i.test(trimmed)) return true;
+  if (/^To:\s/i.test(trimmed)) return true;
+  if (/^Subject:\s/i.test(trimmed)) return true;
+
+  if (!/^On\b/i.test(trimmed)) return false;
+
+  const markerParts = [trimmed];
+  const maxContinuationLines = Math.min(lines.length, index + 5);
+
+  for (let cursor = index; cursor < maxContinuationLines; cursor += 1) {
+    if (cursor > index) {
+      const continuation = lines[cursor]?.trim() ?? '';
+      if (!continuation) break;
+      markerParts.push(continuation);
+    }
+
+    const collapsedMarker = markerParts.join(' ').replace(/\s+/g, ' ');
+    if (/^On\b.{1,1200}\bwrote:\s*$/i.test(collapsedMarker)) return true;
+  }
+
+  return false;
+}
+
 export function stripQuotedEmailText(value: string) {
   const normalized = value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   const lines = normalized.split('\n');
   const kept: string[] = [];
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (/^>/.test(trimmed)) break;
-    if (/^On .+ wrote:$/.test(trimmed)) break;
-    if (/^-{2,}\s*Original Message\s*-{2,}$/i.test(trimmed)) break;
-    if (/^From:\s/i.test(trimmed)) break;
-    if (/^Sent:\s/i.test(trimmed)) break;
-    if (/^To:\s/i.test(trimmed)) break;
-    if (/^Subject:\s/i.test(trimmed)) break;
-
-    kept.push(line);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (isQuotedEmailBoundary(lines, index)) break;
+    kept.push(lines[index]);
   }
 
   return kept.join('\n').trim().slice(0, 5000);
