@@ -18,6 +18,7 @@ import {
   UserCircle,
   Building2,
   Inbox,
+  LifeBuoy,
 } from 'lucide-react';
 
 interface NavItem {
@@ -25,6 +26,7 @@ interface NavItem {
   href: string;
   icon: React.ReactNode;
   badge?: number;
+  exact?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -42,6 +44,11 @@ const navItems: NavItem[] = [
     title: 'Settings',
     href: '/settings',
     icon: <Settings className="h-5 w-5" />,
+  },
+  {
+    title: 'My Tickets',
+    href: '/support/tickets',
+    icon: <LifeBuoy className="h-5 w-5" />,
   },
 ];
 
@@ -114,6 +121,7 @@ export function Sidebar() {
         title: 'Support Inbox',
         href: '/support',
         icon: <Inbox className="h-5 w-5" />,
+        exact: true,
       },
     ]
     : navItems;
@@ -187,8 +195,9 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
         {visibleNavItems.map((item) => {
-          const isActive = pathname === item.href ||
-            (item.href !== '/' && pathname.startsWith(item.href));
+          const isActive = item.exact
+            ? pathname === item.href
+            : pathname === item.href || (item.href !== '/' && pathname.startsWith(`${item.href}/`));
 
           return (
             <Link

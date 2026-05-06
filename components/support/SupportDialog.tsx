@@ -1,6 +1,7 @@
 "use client";
 
 import { type ChangeEvent, type ClipboardEvent, type FormEvent, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Camera, ImagePlus, LifeBuoy, Loader2, Paperclip, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -68,6 +69,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [successTicketId, setSuccessTicketId] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -201,6 +203,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
     event.preventDefault();
     setError(null);
     setSuccessMessage(null);
+    setSuccessTicketId(null);
 
     if (subject.trim().length < 3) {
       setError('Add a short subject before sending.');
@@ -248,6 +251,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
       }
 
       resetForm();
+      setSuccessTicketId(data.ticket?.id ?? null);
       setSuccessMessage(
         data.notificationStatus === 'failed'
           ? 'Support request saved. Email notification is not configured yet.'
@@ -266,6 +270,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
       if (nextOpen) {
         setError(null);
         setSuccessMessage(null);
+        setSuccessTicketId(null);
       }
     }}>
       <DialogTrigger asChild>
@@ -294,7 +299,16 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
           <div className="space-y-5 px-6 py-5">
             {successMessage ? (
               <div className="rounded-[12px] border border-[rgba(110,139,94,0.24)] bg-[rgba(110,139,94,0.12)] px-4 py-3 text-sm text-[#48613d]">
-                {successMessage}
+                <div>{successMessage}</div>
+                {successTicketId ? (
+                  <Link
+                    href={`/support/tickets?ticket=${encodeURIComponent(successTicketId)}`}
+                    className="mt-2 inline-flex font-semibold text-[#34472d] underline-offset-4 hover:underline"
+                    onClick={() => setOpen(false)}
+                  >
+                    View ticket
+                  </Link>
+                ) : null}
               </div>
             ) : null}
 
