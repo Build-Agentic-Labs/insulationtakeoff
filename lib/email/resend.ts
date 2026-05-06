@@ -16,17 +16,24 @@ export function getResendClient() {
   return cachedResend;
 }
 
-export function getSupportEmailConfig() {
+function cleanEmailHeaderValue(value: string) {
+  return value.replace(/[\r\n<>"]/g, '').trim();
+}
+
+export function getSupportEmailConfig(submitterEmail?: string | null) {
   const to = process.env.SUPPORT_EMAIL_TO;
-  const from = process.env.SUPPORT_EMAIL_FROM;
+  const configuredFrom = process.env.SUPPORT_EMAIL_FROM;
 
   if (!to) {
     throw new Error('SUPPORT_EMAIL_TO is not configured');
   }
 
-  if (!from) {
-    throw new Error('SUPPORT_EMAIL_FROM is not configured');
-  }
+  const cleanSubmitterEmail = submitterEmail ? cleanEmailHeaderValue(submitterEmail) : '';
+  const from = configuredFrom || (
+    cleanSubmitterEmail
+      ? `Support from ${cleanSubmitterEmail} <onboarding@resend.dev>`
+      : 'Insulation Takeoff Support <onboarding@resend.dev>'
+  );
 
   return { to, from };
 }
