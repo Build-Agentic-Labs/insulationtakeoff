@@ -1,4 +1,4 @@
-import SupportTicketEmail, { buildSupportTicketText, type SupportTicketEmailProps } from '@/emails/support-ticket';
+import { buildSupportTicketHtml, buildSupportTicketText, type SupportTicketEmailProps } from '@/emails/support-ticket';
 import { getResendClient, getSupportEmailConfig } from './resend';
 
 export async function sendSupportTicketEmail(props: SupportTicketEmailProps) {
@@ -10,7 +10,7 @@ export async function sendSupportTicketEmail(props: SupportTicketEmailProps) {
     to,
     subject: `[Support] ${props.subject}`,
     replyTo: props.submitterEmail,
-    react: <SupportTicketEmail {...props} />,
+    html: buildSupportTicketHtml(props),
     text: buildSupportTicketText(props),
   });
 
