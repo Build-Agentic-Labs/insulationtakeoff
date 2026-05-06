@@ -3,7 +3,7 @@
 import { type ChangeEvent, type ClipboardEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Camera, ImagePlus, LifeBuoy, Loader2, Paperclip, Send, X } from 'lucide-react';
+import { Camera, ImagePlus, Loader2, Paperclip, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -280,8 +280,8 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
             collapsed && "justify-center px-2"
           )}
         >
-          <LifeBuoy className="h-5 w-5" />
-          {!collapsed && <span>Support</span>}
+          <Send className="h-5 w-5" />
+          {!collapsed && <span>New ticket</span>}
         </button>
       </DialogTrigger>
       <DialogContent

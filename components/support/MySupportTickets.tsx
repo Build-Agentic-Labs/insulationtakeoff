@@ -113,7 +113,7 @@ export function MySupportTickets({ initialTickets, initialSelectedTicketId }: My
           <header className="flex flex-col gap-4 border-b border-[var(--takeoff-line)] pb-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="ev-label">Support</div>
-              <h1 className="ev-title mt-2 text-4xl">My Tickets</h1>
+              <h1 className="ev-title mt-2 text-4xl">Support Tickets</h1>
               <p className="mt-2 max-w-2xl text-sm text-[var(--takeoff-text-muted)]">
                 Track the questions and screenshots you have sent to support.
               </p>
