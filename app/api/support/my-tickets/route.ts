@@ -3,6 +3,7 @@ import { authApiErrorResponse } from '@/lib/supabase/api-errors';
 import { requireServerCompanyMembership } from '@/lib/supabase/company-server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import type { Database } from '@/lib/supabase/types';
+import { SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
 
 type SupportStatus = Database['public']['Tables']['support_tickets']['Row']['status'];
 
@@ -15,11 +16,7 @@ export async function GET(request: NextRequest) {
 
     let query = supabaseAdmin
       .from('support_tickets')
-      .select(`
-        *,
-        project:projects(id, name),
-        attachments:support_ticket_attachments(*)
-      `)
+      .select(SUPPORT_TICKET_WITH_THREAD_SELECT)
       .eq('company_id', companyId)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });

@@ -3,6 +3,7 @@ import { authApiErrorResponse } from '@/lib/supabase/api-errors';
 import { requireServerCompanyAdmin } from '@/lib/supabase/company-server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import type { Database } from '@/lib/supabase/types';
+import { SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
 
 type SupportStatus = Database['public']['Tables']['support_tickets']['Row']['status'];
 
@@ -18,11 +19,7 @@ export async function GET(
 
     const { data, error } = await supabaseAdmin
       .from('support_tickets')
-      .select(`
-        *,
-        project:projects(id, name),
-        attachments:support_ticket_attachments(*)
-      `)
+      .select(SUPPORT_TICKET_WITH_THREAD_SELECT)
       .eq('id', id)
       .eq('company_id', companyId)
       .single();
@@ -64,11 +61,7 @@ export async function PATCH(
       .update(updates)
       .eq('id', id)
       .eq('company_id', companyId)
-      .select(`
-        *,
-        project:projects(id, name),
-        attachments:support_ticket_attachments(*)
-      `)
+      .select(SUPPORT_TICKET_WITH_THREAD_SELECT)
       .single();
 
     if (error || !data) {

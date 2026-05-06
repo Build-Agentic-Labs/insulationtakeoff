@@ -274,6 +274,75 @@ export interface Database {
           }
         ]
       }
+      support_ticket_messages: {
+        Row: {
+          id: string
+          ticket_id: string
+          company_id: string
+          author_user_id: string | null
+          author_email: string
+          author_role: 'customer' | 'support' | 'system'
+          body: string
+          source: 'app' | 'email'
+          inbound_email_id: string | null
+          inbound_message_id: string | null
+          outbound_email_id: string | null
+          notification_status: 'pending' | 'sent' | 'failed' | 'skipped'
+          notification_error: string | null
+          notified_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          ticket_id: string
+          company_id: string
+          author_user_id?: string | null
+          author_email: string
+          author_role: 'customer' | 'support' | 'system'
+          body: string
+          source?: 'app' | 'email'
+          inbound_email_id?: string | null
+          inbound_message_id?: string | null
+          outbound_email_id?: string | null
+          notification_status?: 'pending' | 'sent' | 'failed' | 'skipped'
+          notification_error?: string | null
+          notified_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          ticket_id?: string
+          company_id?: string
+          author_user_id?: string | null
+          author_email?: string
+          author_role?: 'customer' | 'support' | 'system'
+          body?: string
+          source?: 'app' | 'email'
+          inbound_email_id?: string | null
+          inbound_message_id?: string | null
+          outbound_email_id?: string | null
+          notification_status?: 'pending' | 'sent' | 'failed' | 'skipped'
+          notification_error?: string | null
+          notified_at?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_ticket_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "support_ticket_messages_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       projects: {
         Row: {
           id: string

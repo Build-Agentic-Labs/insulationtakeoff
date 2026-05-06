@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { ExternalLink, ImageIcon, Inbox, Loader2, RefreshCw, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { SupportThread } from './SupportThread';
 import type { SupportStatus, SupportTicket } from './SupportQueue';
 
 interface MySupportTicketsProps {
@@ -104,6 +105,12 @@ export function MySupportTickets({ initialTickets, initialSelectedTicketId }: My
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  const replaceTicket = (nextTicket: SupportTicket) => {
+    setTickets((current) => current.map((ticket) => (
+      ticket.id === nextTicket.id ? nextTicket : ticket
+    )));
   };
 
   return (
@@ -214,12 +221,7 @@ export function MySupportTickets({ initialTickets, initialSelectedTicketId }: My
 
                   <div className="grid flex-1 gap-5 p-5 lg:grid-cols-[1fr_280px]">
                     <div className="space-y-5">
-                      <div>
-                        <div className="ev-label">Question</div>
-                        <div className="mt-2 whitespace-pre-wrap rounded-[14px] border border-[var(--takeoff-line)] bg-white px-4 py-4 text-sm leading-6 text-[var(--takeoff-ink)]">
-                          {selectedTicket.message}
-                        </div>
-                      </div>
+                      <SupportThread ticket={selectedTicket} viewerRole="customer" onTicketUpdated={replaceTicket} />
 
                       <div>
                         <div className="ev-label">Screenshots</div>

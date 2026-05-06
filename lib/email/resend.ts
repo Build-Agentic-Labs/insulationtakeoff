@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { cleanEmailHeaderValue } from '@/lib/support/tickets';
 
 let cachedResend: Resend | null = null;
 
@@ -16,24 +17,39 @@ export function getResendClient() {
   return cachedResend;
 }
 
-function cleanEmailHeaderValue(value: string) {
-  return value.replace(/[\r\n<>"]/g, '').trim();
-}
-
-export function getSupportEmailConfig(submitterEmail?: string | null) {
+export function getSupportEmailTo() {
   const to = process.env.SUPPORT_EMAIL_TO;
-  const configuredFrom = process.env.SUPPORT_EMAIL_FROM;
 
   if (!to) {
     throw new Error('SUPPORT_EMAIL_TO is not configured');
   }
 
+  const recipients = to
+    .split(',')
+    .map((email) => email.trim())
+    .filter(Boolean);
+
+  if (recipients.length === 0) {
+    throw new Error('SUPPORT_EMAIL_TO is not configured');
+  }
+
+  return recipients.length === 1 ? recipients[0] : recipients;
+}
+
+export function getSupportEmailFrom(submitterEmail?: string | null) {
+  const configuredFrom = process.env.SUPPORT_EMAIL_FROM;
   const cleanSubmitterEmail = submitterEmail ? cleanEmailHeaderValue(submitterEmail) : '';
-  const from = configuredFrom || (
+
+  return configuredFrom || (
     cleanSubmitterEmail
       ? `Support from ${cleanSubmitterEmail} <onboarding@resend.dev>`
       : 'Insulation Takeoff Support <onboarding@resend.dev>'
   );
+}
+
+export function getSupportEmailConfig(submitterEmail?: string | null) {
+  const to = getSupportEmailTo();
+  const from = getSupportEmailFrom(submitterEmail);
 
   return { to, from };
 }

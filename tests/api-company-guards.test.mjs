@@ -11,7 +11,9 @@ import path from 'node:path';
 const root = process.cwd();
 const apiRoot = path.join(root, 'app', 'api');
 
-const intentionallyPublic = new Set([]);
+const intentionallyPublic = new Set([
+  'app/api/support/inbound/route.ts',
+]);
 
 function walkRoutes(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });

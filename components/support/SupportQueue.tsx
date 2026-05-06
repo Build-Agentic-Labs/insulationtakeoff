@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { ExternalLink, ImageIcon, Inbox, Loader2, MailWarning, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { SupportThread } from './SupportThread';
 
 export type SupportStatus = 'open' | 'in_progress' | 'resolved';
 export type NotificationStatus = 'pending' | 'sent' | 'failed' | 'skipped';
@@ -14,6 +15,24 @@ export interface SupportAttachment {
   file_name: string;
   file_type: string;
   file_size: number;
+  created_at: string;
+}
+
+export interface SupportMessage {
+  id: string;
+  ticket_id: string;
+  company_id: string;
+  author_user_id: string | null;
+  author_email: string;
+  author_role: 'customer' | 'support' | 'system';
+  body: string;
+  source: 'app' | 'email';
+  inbound_email_id: string | null;
+  inbound_message_id: string | null;
+  outbound_email_id: string | null;
+  notification_status: NotificationStatus;
+  notification_error: string | null;
+  notified_at: string | null;
   created_at: string;
 }
 
@@ -35,6 +54,7 @@ export interface SupportTicket {
     name: string;
   } | null;
   attachments: SupportAttachment[];
+  messages?: SupportMessage[];
 }
 
 interface SupportQueueProps {
@@ -106,7 +126,7 @@ export function SupportQueue({ initialTickets, initialSelectedTicketId }: Suppor
     return tickets.filter((ticket) => ticket.status === activeStatus);
   }, [activeStatus, tickets]);
 
-  const selectedTicket = tickets.find((ticket) => ticket.id === selectedTicketId) ?? filteredTickets[0] ?? null;
+  const selectedTicket = filteredTickets.find((ticket) => ticket.id === selectedTicketId) ?? filteredTickets[0] ?? null;
 
   const counts = useMemo(() => ({
     all: tickets.length,
@@ -164,6 +184,12 @@ export function SupportQueue({ initialTickets, initialSelectedTicketId }: Suppor
     } finally {
       setUpdatingTicketId(null);
     }
+  };
+
+  const replaceTicket = (nextTicket: SupportTicket) => {
+    setTickets((current) => current.map((ticket) => (
+      ticket.id === nextTicket.id ? nextTicket : ticket
+    )));
   };
 
   return (
@@ -292,12 +318,7 @@ export function SupportQueue({ initialTickets, initialSelectedTicketId }: Suppor
 
                   <div className="grid flex-1 gap-5 p-5 lg:grid-cols-[1fr_280px]">
                     <div className="space-y-5">
-                      <div>
-                        <div className="ev-label">Question</div>
-                        <div className="mt-2 whitespace-pre-wrap rounded-[14px] border border-[var(--takeoff-line)] bg-white px-4 py-4 text-sm leading-6 text-[var(--takeoff-ink)]">
-                          {selectedTicket.message}
-                        </div>
-                      </div>
+                      <SupportThread ticket={selectedTicket} viewerRole="support" onTicketUpdated={replaceTicket} />
 
                       <div>
                         <div className="ev-label">Screenshots</div>

@@ -5,6 +5,7 @@ import { authApiErrorResponse } from '@/lib/supabase/api-errors';
 import { requireServerCompanyAdmin, requireServerCompanyMembership } from '@/lib/supabase/company-server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import type { Database, Json } from '@/lib/supabase/types';
+import { SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
 import {
   createSignedStorageUrl,
   MAX_SUPPORT_ATTACHMENTS,
@@ -14,6 +15,7 @@ import {
 
 type SupportTicketInsert = Database['public']['Tables']['support_tickets']['Insert'];
 type SupportAttachmentInsert = Database['public']['Tables']['support_ticket_attachments']['Insert'];
+type SupportMessageInsert = Database['public']['Tables']['support_ticket_messages']['Insert'];
 type SupportStatus = Database['public']['Tables']['support_tickets']['Row']['status'];
 
 const SUPPORT_STATUSES: SupportStatus[] = ['open', 'in_progress', 'resolved'];
@@ -136,6 +138,28 @@ export async function POST(request: NextRequest) {
 
     createdTicketId = ticket.id;
 
+    const initialMessagePayload: SupportMessageInsert = {
+      ticket_id: ticket.id,
+      company_id: companyId,
+      author_user_id: user.id,
+      author_email: user.email ?? 'unknown user',
+      author_role: 'customer',
+      body: message,
+      source: 'app',
+      notification_status: 'pending',
+    };
+
+    const { data: initialMessage, error: initialMessageError } = await supabaseAdmin
+      .from('support_ticket_messages')
+      .insert(initialMessagePayload)
+      .select()
+      .single();
+
+    if (initialMessageError || !initialMessage) {
+      console.error('Support initial message insert error:', initialMessageError);
+      throw new Error('Failed to create support ticket message');
+    }
+
     const attachmentRows: SupportAttachmentInsert[] = [];
 
     for (const [index, file] of attachments.entries()) {
@@ -194,6 +218,17 @@ export async function POST(request: NextRequest) {
       console.error('Support email error:', error);
     }
 
+    await supabaseAdmin
+      .from('support_ticket_messages')
+      .update({
+        notification_status: notificationStatus,
+        outbound_email_id: notificationId,
+        notification_error: notificationError,
+        notified_at: notificationStatus === 'sent' ? new Date().toISOString() : null,
+      })
+      .eq('id', initialMessage.id)
+      .eq('company_id', companyId);
+
     const { data: updatedTicket } = await supabaseAdmin
       .from('support_tickets')
       .update({
@@ -204,7 +239,7 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', ticket.id)
       .eq('company_id', companyId)
-      .select()
+      .select(SUPPORT_TICKET_WITH_THREAD_SELECT)
       .single();
 
     return NextResponse.json({
@@ -234,11 +269,7 @@ export async function GET(request: NextRequest) {
 
     let query = supabaseAdmin
       .from('support_tickets')
-      .select(`
-        *,
-        project:projects(id, name),
-        attachments:support_ticket_attachments(*)
-      `)
+      .select(SUPPORT_TICKET_WITH_THREAD_SELECT)
       .eq('company_id', companyId)
       .order('created_at', { ascending: false });
 

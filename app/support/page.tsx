@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { SupportQueue, type SupportTicket } from '@/components/support/SupportQueue';
 import { requireServerCompanyAdmin } from '@/lib/supabase/company-server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,11 +23,7 @@ export default async function SupportPage({
   const { ticket: selectedTicketId } = await searchParams;
   const { data, error } = await supabaseAdmin
     .from('support_tickets')
-    .select(`
-      *,
-      project:projects(id, name),
-      attachments:support_ticket_attachments(*)
-    `)
+    .select(SUPPORT_TICKET_WITH_THREAD_SELECT)
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
 
