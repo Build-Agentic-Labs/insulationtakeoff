@@ -10,6 +10,8 @@ import {
   extractVaporBarrierStrings,
 } from '@/lib/takeoff/scan-extracts';
 
+export const maxDuration = 120;
+
 type DetailPageType =
   | 'construction_details'
   | 'building_sections'
@@ -612,6 +614,7 @@ export async function POST(request: NextRequest) {
     if (authResponse.status !== 500) return authResponse;
 
     const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[takeoff/analyze-page-details] failed:', err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

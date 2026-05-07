@@ -6,6 +6,8 @@ import { requireServerCompanyId } from '@/lib/supabase/company-server';
 import { authApiErrorResponse } from '@/lib/supabase/api-errors';
 import { normalizePageScanExtracts } from '@/lib/takeoff/scan-extracts';
 
+export const maxDuration = 120;
+
 const DEFAULT_SCAN_FLAGS: PageScanFlags = {
   sheet_index_revisions_scale: false,
   general_insulation_notes: false,
