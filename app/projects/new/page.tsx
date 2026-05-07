@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { DemoInstructions } from '@/components/demo/DemoInstructions';
 import { DemoTooltip } from '@/components/demo/DemoTooltip';
+import { getProjectRouteRef } from '@/lib/projects/slug';
 
 interface Client {
   id: string;
@@ -216,7 +217,7 @@ function NewProjectContent() {
       if (!attachRes.ok) throw new Error(attachData.error || 'Failed to attach uploaded file');
 
       setUploadStage('opening');
-      router.push(selectedClientId ? `/clients/${selectedClientId}` : `/projects/${projectId}`);
+      router.push(selectedClientId ? `/clients/${selectedClientId}` : `/projects/${getProjectRouteRef(createData.project)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
       setIsUploading(false);
@@ -251,7 +252,7 @@ function NewProjectContent() {
         throw new Error(data.error || 'Failed to create project');
       }
 
-      router.push(`/projects/${data.project.id}/review`);
+      router.push(`/projects/${getProjectRouteRef(data.project)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project');
       setIsCreatingManual(false);

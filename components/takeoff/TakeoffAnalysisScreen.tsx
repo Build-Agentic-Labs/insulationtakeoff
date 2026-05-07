@@ -807,7 +807,10 @@ export function TakeoffAnalysisScreen({
         </div>
 
         <div className="mt-3 grid min-h-0 flex-1 gap-3 overflow-hidden xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-[18px] border border-[var(--takeoff-line)] bg-[rgba(246,248,242,0.85)] p-4">
+          <div
+            className="flex min-h-0 flex-col overflow-hidden rounded-[18px] border border-[var(--takeoff-line)] bg-[rgba(246,248,242,0.85)] p-4"
+            data-tour="vision-page-cards"
+          >
             <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--takeoff-ink)]">
               <FileSearch className="h-4 w-4 text-[var(--takeoff-text-subtle)]" />
               Detected page set
@@ -845,7 +848,10 @@ export function TakeoffAnalysisScreen({
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-[18px] border border-[var(--takeoff-line)] bg-white">
+          <div
+            className="flex min-h-0 flex-col overflow-hidden rounded-[18px] border border-[var(--takeoff-line)] bg-white"
+            data-tour="vision-ai-review"
+          >
             <div className="border-b border-[var(--takeoff-line)] px-3 py-3">
               <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--takeoff-ink)]">
                 <ScanSearch className="h-4 w-4 text-[var(--takeoff-text-subtle)]" />

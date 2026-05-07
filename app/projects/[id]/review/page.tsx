@@ -40,6 +40,7 @@ import { DemoTooltip } from '@/components/demo/DemoTooltip';
 import { ScopeCard } from '@/components/extraction/ScopeCard';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 import { resolveActiveMode as resolveMode, type ModeResolution } from '@/lib/extraction/resolveActiveMode';
+import { getQuoteHref } from '@/lib/takeoff/navigation';
 
 // ─── Interfaces ─────────────────────────────────────────────
 
@@ -1013,7 +1014,7 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
             <Link href={`/projects/${project.id}`}>
               <Button variant="outline">Back to Project</Button>
             </Link>
-            <Link href={`/projects/${project.id}/quote`}>
+            <Link href={getQuoteHref(project.id, 'review')}>
               <Button
                 className={
                   allVerified

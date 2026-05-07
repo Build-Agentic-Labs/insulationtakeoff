@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
+import { getProjectRefColumn, getProjectRouteRef } from '@/lib/projects/slug';
 import {
   FileText,
   FileCheck,
@@ -24,6 +25,7 @@ import {
 
 interface Project {
   id: string;
+  slug: string | null;
   name: string;
   status: string;
   pdf_url: string | null;
@@ -91,7 +93,7 @@ function projectStatusBadgeClass(status: string): string {
 }
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+  const { id: projectRef } = use(params);
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -104,8 +106,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   useEffect(() => {
     loadProject();
-    loadDocuments();
-  }, [id]);
+  }, [projectRef]);
 
   const loadProject = async () => {
     try {
@@ -116,12 +117,13 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           *,
           client:clients(id, name)
         `)
-        .eq('id', id)
+        .eq(getProjectRefColumn(projectRef), projectRef)
         .eq('company_id', companyId)
         .single();
 
       if (error) throw error;
       setProject(data);
+      await loadDocuments(data.id);
     } catch (error) {
       console.error('Error fetching project:', error);
     } finally {
@@ -129,9 +131,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     }
   };
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/documents?projectId=${id}`);
+      const response = await fetch(`/api/documents?projectId=${projectId}`);
       const data = await response.json();
       if (data.documents) {
         setDocuments(data.documents);
@@ -144,7 +146,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const handleDelete = async () => {
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/projects/${id}`, {
+      if (!project) return;
+
+      const response = await fetch(`/api/projects/${project.id}`, {
         method: 'DELETE',
       });
 
@@ -182,7 +186,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       handleFileUpload(Array.from(e.dataTransfer.files));
     }
-  }, [id]);
+  }, [project?.id, projectRef]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -197,7 +201,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
       for (const file of files) {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('projectId', id);
+        if (!project) return;
+        formData.append('projectId', project.id);
 
         const response = await fetch('/api/documents', {
           method: 'POST',
@@ -210,7 +215,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         }
       }
 
-      await loadDocuments();
+      if (project) await loadDocuments(project.id);
     } catch (error) {
       console.error('Upload error:', error);
     } finally {
@@ -272,6 +277,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   const statusLabel = formatProjectStatus(project.status);
   const statusBadgeClass = projectStatusBadgeClass(project.status);
+  const projectRouteRef = getProjectRouteRef(project);
   const primaryButtonClass =
     'takeoff-mono inline-flex h-11 items-center justify-center rounded-[12px] border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-5 text-[11px] font-semibold text-white shadow-[0_10px_28px_rgba(31,39,33,0.18)] transition-[background-color,border-color,transform,box-shadow] hover:-translate-y-[1px] hover:bg-[#202621] hover:shadow-[0_12px_32px_rgba(31,39,33,0.22)]';
 
@@ -383,7 +389,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
           <section className="grid gap-4 md:grid-cols-2">
             <Link
-              href={`/projects/${project.id}/takeoff`}
+              href={`/projects/${projectRouteRef}/takeoff`}
               className="group flex min-h-[132px] items-center justify-between gap-4 rounded-[28px] border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-6 py-5 text-white shadow-[0_24px_48px_rgba(31,39,33,0.18)] transition-[transform,box-shadow,background-color] hover:-translate-y-[2px] hover:bg-[#202621] hover:shadow-[0_28px_56px_rgba(31,39,33,0.22)]"
             >
               <div className="flex min-w-0 items-center gap-4">
@@ -406,7 +412,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             </Link>
 
             <Link
-              href={`/projects/${project.id}/quote`}
+              href={`/projects/${projectRouteRef}/quote`}
               className="group flex min-h-[132px] items-center justify-between gap-4 rounded-[28px] border border-[var(--takeoff-line)] bg-[rgba(255,255,255,0.92)] px-6 py-5 shadow-[0_20px_44px_rgba(31,39,33,0.08)] transition-[transform,box-shadow,border-color,background-color] hover:-translate-y-[2px] hover:border-[var(--takeoff-line-strong)] hover:bg-white hover:shadow-[0_24px_52px_rgba(31,39,33,0.12)]"
             >
               <div className="flex min-w-0 items-center gap-4">

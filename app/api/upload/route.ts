@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { uploadFile, validateUploadFile } from '@/lib/supabase/storage';
 import { requireServerCompanyId } from '@/lib/supabase/company-server';
+import { insertProjectWithSlug } from '@/lib/projects/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,19 +51,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Create project record first to get the ID
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from('projects')
-      .insert({
-        name: projectName,
-        company_id: companyId,
-        pdf_url: '', // Will update after upload
-        status: 'uploaded',
-        client_id: clientId || null,
-      })
-      .select()
-      .single();
+    const { data: project, error: projectError } = await insertProjectWithSlug({
+      name: projectName,
+      company_id: companyId,
+      pdf_url: '', // Will update after upload
+      status: 'uploaded',
+      client_id: clientId || null,
+    });
 
-    if (projectError) {
+    if (projectError || !project) {
       console.error('Error creating project:', projectError);
       return NextResponse.json(
         { error: 'Failed to create project' },

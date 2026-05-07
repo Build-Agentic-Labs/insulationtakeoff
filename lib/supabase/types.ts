@@ -347,6 +347,7 @@ export interface Database {
         Row: {
           id: string
           company_id: string
+          slug: string | null
           name: string
           pdf_url: string | null
           status: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'
@@ -359,6 +360,7 @@ export interface Database {
         Insert: {
           id?: string
           company_id?: string
+          slug?: string | null
           name: string
           pdf_url?: string | null
           status?: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'
@@ -371,6 +373,7 @@ export interface Database {
         Update: {
           id?: string
           company_id?: string
+          slug?: string | null
           name?: string
           pdf_url?: string | null
           status?: 'uploaded' | 'extracting' | 'reviewing' | 'completed' | 'manual'

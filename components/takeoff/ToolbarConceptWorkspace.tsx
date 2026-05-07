@@ -2647,11 +2647,11 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
               </div>
             </div>
 
-            <div className={sectionClass}>
+            <div className={sectionClass} data-tour="takeoff-primary-tools">
               <div className="grid grid-cols-2 gap-2">{primaryToolButtons(false)}</div>
             </div>
 
-            <div className={sectionClass}>
+            <div className={sectionClass} data-tour="takeoff-areas-list">
               <div className="flex items-center justify-between gap-3">
                 <div className="takeoff-label text-[9px] font-semibold text-[var(--takeoff-text-subtle)]">
                   Areas
@@ -2718,7 +2718,7 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
               </div>
             </div>
 
-            <div className={`${sectionClass} min-h-0 flex-1`}>
+            <div className={`${sectionClass} min-h-0 flex-1`} data-tour="takeoff-tool-panel">
               <div className="flex items-center justify-between gap-3">
                 <div className="takeoff-label text-[9px] font-semibold text-[var(--takeoff-text-subtle)]">
                   {activePanelTitle}

@@ -13,6 +13,9 @@ const PDFENGINE_BASE_URL = process.env.PDFENGINE_BASE_URL || 'http://localhost:8
 const PDFENGINE_API_KEY = process.env.PDFENGINE_API_KEY || '';
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 280_000; // slightly under maxDuration
+const LEGACY_PDF_ENGINE_ENABLED = process.env.ENABLE_LEGACY_PDF_ENGINE === 'true';
+const LEGACY_PDF_ENGINE_DISABLED_MESSAGE =
+  'Automated PDF-engine takeoff is temporarily unavailable. Use the manual takeoff workspace.';
 
 /** Build headers for pdfengine requests */
 function pdfHeaders(contentType?: string): Record<string, string> {
@@ -112,6 +115,13 @@ async function processAndPoll(
 }
 
 export async function POST(request: NextRequest) {
+  if (!LEGACY_PDF_ENGINE_ENABLED) {
+    return NextResponse.json(
+      { error: LEGACY_PDF_ENGINE_DISABLED_MESSAGE },
+      { status: 410 },
+    );
+  }
+
   let projectId: string | undefined;
   let documentId: string | undefined;
   let runId: string | undefined;

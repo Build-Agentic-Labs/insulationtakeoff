@@ -6,6 +6,7 @@ import { requireServerCompanyAdmin, requireServerCompanyMembership } from '@/lib
 import { supabaseAdmin } from '@/lib/supabase/server';
 import type { Database, Json } from '@/lib/supabase/types';
 import { SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
+import { getProjectRefColumn } from '@/lib/projects/slug';
 import {
   createSignedStorageUrl,
   MAX_SUPPORT_ATTACHMENTS,
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
     const subject = getTextField(formData, 'subject', 140);
     const message = getTextField(formData, 'message', 5000);
     const pageUrl = getTextField(formData, 'pageUrl', 2048) || null;
-    const projectId = getTextField(formData, 'projectId', 64) || null;
+    const projectRef = getTextField(formData, 'projectId', 96) || null;
     const browserInfo = parseBrowserInfo(getTextField(formData, 'browserInfo', 4000));
     const attachments = getAttachmentFiles(formData);
 
@@ -88,12 +89,13 @@ export async function POST(request: NextRequest) {
     }
 
     let projectName: string | null = null;
+    let projectId: string | null = null;
 
-    if (projectId) {
+    if (projectRef) {
       const { data: project, error: projectError } = await supabaseAdmin
         .from('projects')
         .select('id, name')
-        .eq('id', projectId)
+        .eq(getProjectRefColumn(projectRef), projectRef)
         .eq('company_id', companyId)
         .maybeSingle();
 
@@ -101,6 +103,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Project not found' }, { status: 404 });
       }
 
+      projectId = project.id;
       projectName = project.name;
     }
 

@@ -1289,7 +1289,7 @@ export function ZoneToolbarWorkspace({ pdfUrl }: ZoneToolbarWorkspaceProps) {
               </div>
             </div>
 
-            <div className={leftSectionClass}>
+            <div className={leftSectionClass} data-tour="areas-primary-tools">
               <div className="grid grid-cols-2 gap-1.5">
                 <PrimaryToolButton
                   label="Select"
@@ -1323,6 +1323,7 @@ export function ZoneToolbarWorkspace({ pdfUrl }: ZoneToolbarWorkspaceProps) {
 
             {anticipatedZones.length > 0 && (
               <div
+                data-tour="areas-ai-suggestions"
                 className={`${leftSectionClass} transition-all duration-500 ${
                   shouldHighlightZoneSelection
                     ? 'bg-[rgba(59,130,246,0.08)] shadow-[inset_0_0_0_1px_rgba(59,130,246,0.32),0_10px_24px_rgba(59,130,246,0.08)]'

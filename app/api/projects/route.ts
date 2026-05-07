@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/server';
 import { requireServerCompanyId } from '@/lib/supabase/company-server';
+import { supabaseAdmin } from '@/lib/supabase/server';
+import { insertProjectWithSlug } from '@/lib/projects/server';
 
 const PROJECT_STATUSES = ['uploaded', 'extracting', 'reviewing', 'completed', 'manual'] as const;
 
@@ -50,11 +51,7 @@ export async function POST(request: NextRequest) {
       client_id: clientId || null,
     };
 
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from('projects')
-      .insert(insertData)
-      .select()
-      .single();
+    const { data: project, error: projectError } = await insertProjectWithSlug(insertData);
 
     if (projectError) {
       console.error('Error creating project:', projectError);

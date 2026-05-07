@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase/client';
 import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { getProjectRouteRef } from '@/lib/projects/slug';
 import {
   Users,
   FolderOpen,
@@ -26,6 +27,7 @@ interface Stats {
 
 interface RecentProject {
   id: string;
+  slug: string | null;
   name: string;
   status: string;
   created_at: string;
@@ -88,7 +90,7 @@ export default function DashboardPage() {
       const { data: projectsData } = await supabase
         .from('projects')
         .select(`
-          id, name, status, created_at,
+          id, slug, name, status, created_at,
           client:clients(name)
         `)
         .eq('company_id', companyId)
@@ -253,7 +255,7 @@ export default function DashboardPage() {
                 {recentProjects.map((project) => (
                   <Link
                     key={project.id}
-                    href={`/projects/${project.id}`}
+                    href={`/projects/${getProjectRouteRef(project)}`}
                     className="group flex items-center justify-between rounded-[18px] p-3 transition-colors hover:bg-[var(--takeoff-paper)]"
                   >
                     <div className="flex items-center gap-3">

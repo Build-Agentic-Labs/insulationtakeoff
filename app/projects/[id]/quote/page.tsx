@@ -28,6 +28,8 @@ import {
   mapTakeoffSessionRowToSession,
   type TakeoffSessionRowLike,
 } from '@/lib/takeoff/workspace-v2';
+import { getProjectWorkspaceHref, resolveQuoteReviewHref } from '@/lib/takeoff/navigation';
+import { getProjectRefColumn, getProjectRouteRef } from '@/lib/projects/slug';
 
 interface Room {
   id: string;
@@ -40,6 +42,7 @@ interface Room {
 
 interface ProjectRecord {
   id: string;
+  slug?: string | null;
   name: string;
   active_extraction_mode?: 'ocr' | 'vision' | null;
 }
@@ -253,13 +256,14 @@ function quoteLineItemsToInsulationAreas(lineItems: unknown): InsulationArea[] {
 }
 
 export default function QuotePage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+  const { id: projectRef } = use(params);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [quote, setQuote] = useState<QuoteRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [insulationAreas, setInsulationAreas] = useState<InsulationArea[]>([]);
+  const [reviewHref, setReviewHref] = useState(getProjectWorkspaceHref(projectRef));
   const [taxAmount, setTaxAmount] = useState(0);
   const [terms, setTerms] = useState(
     'Final field measurements will be verified before installation. Pricing includes labor and standard insulation materials unless noted otherwise.'
@@ -477,16 +481,23 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       const { data: projectData } = await supabase
         .from('projects')
         .select('*')
-        .eq('id', id)
+        .eq(getProjectRefColumn(projectRef), projectRef)
         .eq('company_id', companyId)
         .single();
 
-      setProject((projectData as ProjectRecord | null) ?? null);
+      const loadedProject = (projectData as ProjectRecord | null) ?? null;
+      const projectId = loadedProject?.id;
+      const projectRouteRef = loadedProject ? getProjectRouteRef(loadedProject) : projectRef;
+      setProject(loadedProject);
+
+      if (!projectId) {
+        throw new Error('Project not found');
+      }
 
       const { data: roomsData } = await supabase
         .from('rooms')
         .select('*')
-        .eq('project_id', id)
+        .eq('project_id', projectId)
         .eq('company_id', companyId);
 
       const loadedRooms = roomsData || [];
@@ -503,7 +514,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       const { data: takeoffSessionData } = await supabase
         .from('takeoff_sessions')
         .select('*')
-        .eq('project_id', id)
+        .eq('project_id', projectId)
         .eq('company_id', companyId)
         .in('status', ['in_progress', 'calibrating', 'tracing', 'reviewing', 'completed'])
         .order('updated_at', { ascending: false })
@@ -513,20 +524,28 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       const takeoffSession = takeoffSessionData
         ? mapTakeoffSessionRowToSession(takeoffSessionData as TakeoffSessionRowLike)
         : null;
+      const quoteSource =
+        typeof window === 'undefined'
+          ? null
+          : new URLSearchParams(window.location.search).get('source');
+      setReviewHref(resolveQuoteReviewHref(projectRouteRef, {
+        source: quoteSource,
+        hasTakeoffSession: Boolean(takeoffSession),
+      }));
       const workspaceSummary = getPreferredWorkspaceSummary(takeoffSession);
       const estimateRows = sanitizeEstimateRows(takeoffSession?.estimateRows);
 
       const { data: runsData } = await supabase
         .from('extraction_runs')
         .select('id, mode, status, finished_at, takeoff_envelope')
-        .eq('project_id', id)
+        .eq('project_id', projectId)
         .eq('company_id', companyId)
         .order('finished_at', { ascending: false });
 
       const { data: docsData } = await supabase
         .from('documents')
         .select('takeoff_envelope')
-        .eq('project_id', id)
+        .eq('project_id', projectId)
         .eq('company_id', companyId)
         .not('takeoff_envelope', 'is', null)
         .order('created_at', { ascending: false })
@@ -578,7 +597,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       const { data: quoteData } = await supabase
         .from('quotes')
         .select('*')
-        .eq('project_id', id)
+        .eq('project_id', projectId)
         .eq('company_id', companyId)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -597,7 +616,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
     } finally {
       setIsLoading(false);
     }
-  }, [id, initializeInsulationAreas, restoreFromQuote]);
+  }, [projectRef, initializeInsulationAreas, restoreFromQuote]);
 
   useEffect(() => {
     void loadData();
@@ -714,6 +733,11 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
   };
 
   const handleGenerateQuote = async () => {
+    if (!project) {
+      setError('Project not found');
+      return;
+    }
+
     const errors = getValidationErrors();
     if (errors.length > 0) {
       setError(errors[0]);
@@ -736,7 +760,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
           'Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify({
-          projectId: id,
+          projectId: project.id,
           idempotencyKey,
           lineItems,
           subtotal,
@@ -797,7 +821,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            <Link href={`/projects/${id}/review`}>
+            <Link href={reviewHref}>
               <Button variant="outline" className="ev-secondary-action px-5">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to Review

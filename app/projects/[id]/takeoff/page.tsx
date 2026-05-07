@@ -2,7 +2,7 @@
 
 import { use, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Check, Loader2, Save } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, HelpCircle, Loader2, Save } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
 import { supabase } from '@/lib/supabase/client';
 import { getActiveCompanyId } from '@/lib/supabase/company';
@@ -11,6 +11,7 @@ import { TakeoffAnalysisScreen } from '@/components/takeoff/TakeoffAnalysisScree
 import { ToolbarConceptWorkspace } from '@/components/takeoff/ToolbarConceptWorkspace';
 import { ZoneToolbarWorkspace } from '@/components/takeoff/ZoneToolbarWorkspace';
 import { TakeoffSummary } from '@/components/takeoff/TakeoffSummary';
+import { TakeoffGuideTour } from '@/components/takeoff/TakeoffGuideTour';
 import { usePreventHistoryBack } from '@/components/takeoff/usePreventHistoryBack';
 import { registerPersistedSessionRevision, saveSession } from '@/lib/takeoff/save-session';
 import type {
@@ -31,6 +32,8 @@ import {
   takeoffSessionToApiPayload,
   type TakeoffSessionRowLike,
 } from '@/lib/takeoff/workspace-v2';
+import { getProjectWorkspaceHref, getQuoteHref, parseTakeoffRouteStep } from '@/lib/takeoff/navigation';
+import { getProjectRefColumn, getProjectRouteRef } from '@/lib/projects/slug';
 import {
   extractAirBarrierStrings,
   extractBaffleOrVentingStrings,
@@ -1002,9 +1005,11 @@ function resetTakeoffStore() {
 }
 
 export default function TakeoffPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: projectId } = use(params);
+  const { id: projectRef } = use(params);
   const router = useRouter();
   usePreventHistoryBack(true);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectRouteRef, setProjectRouteRef] = useState(projectRef);
 
   // ── Document state ──────────────────────────────────────────────────────────
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -1031,11 +1036,19 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   const setStep = useTakeoffStore((s) => s.setStep);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [guideReplaySignal, setGuideReplaySignal] = useState(0);
 
   // ── Load document on mount ─────────────────────────────────────────────────
   useEffect(() => {
     async function loadDocument() {
+      const requestedStep =
+        typeof window === 'undefined'
+          ? null
+          : parseTakeoffRouteStep(new URLSearchParams(window.location.search).get('step'));
+
       resetTakeoffStore();
+      setProjectId(null);
+      setProjectRouteRef(projectRef);
       setClassifications([]);
       setClassificationDone(false);
       setClassificationError(null);
@@ -1046,10 +1059,25 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
       try {
         const companyId = await getActiveCompanyId();
+        const { data: projectData, error: projectError } = await supabase
+          .from('projects')
+          .select('id, slug')
+          .eq(getProjectRefColumn(projectRef), projectRef)
+          .eq('company_id', companyId)
+          .single();
+
+        if (projectError || !projectData) {
+          throw projectError ?? new Error('Project not found');
+        }
+
+        const resolvedProjectId = projectData.id;
+        setProjectId(resolvedProjectId);
+        setProjectRouteRef(getProjectRouteRef(projectData));
+
         const { data: docs } = await supabase
           .from('documents')
           .select('id, file_url')
-          .eq('project_id', projectId)
+          .eq('project_id', resolvedProjectId)
           .eq('company_id', companyId)
           .order('created_at', { ascending: false })
           .limit(1);
@@ -1063,7 +1091,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
             .select('*')
             .eq('document_id', docs[0].id)
             .eq('company_id', companyId)
-            .in('status', ['in_progress', 'calibrating', 'tracing', 'reviewing'])
+            .in('status', ['in_progress', 'calibrating', 'tracing', 'reviewing', 'completed'])
             .order('updated_at', { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -1076,9 +1104,10 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
               resumedSession.id,
               resumedSession.updatedAt,
             );
+            const restoredStep = requestedStep ?? 'analysis';
             useTakeoffStore.setState({
               session: resumedSession,
-              currentStep: 'analysis',
+              currentStep: restoredStep,
               selectedPages: resumedSession.selectedPages,
               activePageIndex:
                 resumedSession.pageAnalysis?.find((page) => page.roles.includes('measurement'))
@@ -1132,7 +1161,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       }
     }
     loadDocument();
-  }, [projectId]);
+  }, [projectRef]);
 
   // ── Classify pages with Vision AI (cached per document) ─────────────────────
   const classifyPages = useCallback(async (url: string) => {
@@ -1477,7 +1506,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     const currentSelectedPages = currentPageScores
       .filter((page) => page.roles.length > 0)
       .map((page) => page.page_index);
-    if (!documentId || currentSelectedPages.length === 0) return;
+    if (!projectId || !documentId || currentSelectedPages.length === 0) return;
 
     let sessionId = uuid();
     const pageAnalysis = buildPageAnalysisFromPageScores({
@@ -1623,8 +1652,8 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       return;
     }
 
-    router.push(`/projects/${projectId}`);
-  }, [flowStep, projectId, router, setStep]);
+    router.push(getProjectWorkspaceHref(projectRouteRef));
+  }, [flowStep, projectRouteRef, router, setStep]);
 
   const handleHeaderNext = useCallback(() => {
     if (flowStep === 'analysis') {
@@ -1711,7 +1740,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         </div>
 
         <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 lg:block">
-          <div className="pointer-events-auto flex items-center">
+          <div className="pointer-events-auto flex items-center" data-tour="takeoff-flow">
             {flowSteps.map((step, index) => {
               const active = step.key === flowStep;
               const completed = index < activeFlowIndex;
@@ -1722,6 +1751,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
                   <button
                     onClick={() => goToStep(step.key)}
                     disabled={!enabled}
+                    data-tour={`takeoff-step-${step.key}`}
                     className={`flex items-center gap-2 rounded-[12px] border py-1 pl-1 pr-3 transition-[border-color,background-color,color,box-shadow] ${
                       active
                         ? 'border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] text-white shadow-[0_8px_24px_rgba(31,39,33,0.14)]'
@@ -1763,6 +1793,15 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setGuideReplaySignal((value) => value + 1)}
+            className="takeoff-mono flex h-7 items-center gap-1 rounded-[12px] border border-[var(--takeoff-line)] bg-white px-2.5 text-[8px] font-semibold text-[var(--takeoff-ink)] transition-colors hover:border-[var(--takeoff-line-strong)] hover:bg-[var(--takeoff-paper)]"
+          >
+            <HelpCircle className="h-2.5 w-2.5" />
+            Guide
+          </button>
+
           {flowStep === 'workspace' && session && (
             <button
               onClick={handleSave}
@@ -1801,34 +1840,48 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       {/* Content */}
       <div className="flex-1 min-h-0">
         {(currentStep === 'analysis' || currentStep === 'page-selection') && (
-          <TakeoffAnalysisScreen
-            pdfUrl={pdfUrl}
-            totalPages={totalPages}
-            pageScores={pageScores}
-            isClassifying={isClassifying}
-            classificationDone={classificationDone}
-            classificationError={classificationError}
-            analysisProgress={analysisProgress}
-            onContinue={handleConfirmPageSelection}
-          />
+          <div className="h-full" data-tour="takeoff-content-analysis">
+            <TakeoffAnalysisScreen
+              pdfUrl={pdfUrl}
+              totalPages={totalPages}
+              pageScores={pageScores}
+              isClassifying={isClassifying}
+              classificationDone={classificationDone}
+              classificationError={classificationError}
+              analysisProgress={analysisProgress}
+              onContinue={handleConfirmPageSelection}
+            />
+          </div>
         )}
 
         {currentStep === 'zones' && session && (
-          <ZoneToolbarWorkspace pdfUrl={pdfUrl} />
+          <div className="h-full" data-tour="takeoff-content-zones">
+            <ZoneToolbarWorkspace pdfUrl={pdfUrl} />
+          </div>
         )}
 
         {currentStep === 'workspace' && session && (
-          <ToolbarConceptWorkspace pdfUrl={pdfUrl} />
+          <div className="h-full" data-tour="takeoff-content-workspace">
+            <ToolbarConceptWorkspace pdfUrl={pdfUrl} />
+          </div>
         )}
 
         {currentStep === 'summary' && session && (
-          <TakeoffSummary
-            session={session}
-            onBack={() => setStep('workspace')}
-            onContinue={() => router.push(`/projects/${projectId}/quote`)}
-          />
+          <div className="h-full" data-tour="takeoff-content-summary">
+            <TakeoffSummary
+              session={session}
+              onBack={() => setStep('workspace')}
+              onContinue={() => router.push(getQuoteHref(projectRouteRef, 'takeoff'))}
+            />
+          </div>
         )}
       </div>
+      <TakeoffGuideTour
+        currentStep={currentStep}
+        sessionReady={Boolean(session)}
+        replaySignal={guideReplaySignal}
+        onGoToStep={goToStep}
+      />
     </div>
   );
 }

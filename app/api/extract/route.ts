@@ -10,7 +10,18 @@ import { createSignedStorageUrl } from '@/lib/supabase/storage';
 
 export const maxDuration = 60;
 
+const LEGACY_EXTRACTION_ENABLED = process.env.ENABLE_LEGACY_PDF_ENGINE === 'true';
+const LEGACY_EXTRACTION_DISABLED_MESSAGE =
+  'Legacy automated extraction is temporarily unavailable. Use the manual takeoff workspace.';
+
 export async function POST(request: NextRequest) {
+  if (!LEGACY_EXTRACTION_ENABLED) {
+    return NextResponse.json(
+      { error: LEGACY_EXTRACTION_DISABLED_MESSAGE },
+      { status: 410 },
+    );
+  }
+
   let projectId: string | undefined;
   let runId: string | undefined;
   let companyId: string | undefined;

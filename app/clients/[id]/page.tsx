@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { getProjectRouteRef } from '@/lib/projects/slug';
 import {
   ArrowLeft,
   Loader2,
@@ -38,6 +39,7 @@ interface Client {
 
 interface Project {
   id: string;
+  slug: string | null;
   name: string;
   status: string;
   created_at: string;
@@ -362,7 +364,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   {projects.map((project, index) => (
                     <Link
                       key={project.id}
-                      href={`/projects/${project.id}`}
+                      href={`/projects/${getProjectRouteRef(project)}`}
                       className="group block"
                       style={{ animationDelay: `${index * 50}ms` }}
                     >
