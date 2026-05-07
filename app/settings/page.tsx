@@ -54,6 +54,8 @@ interface TeamInvitation {
   created_at: string;
 }
 
+const COMPANY_PROFILE_UPDATED_EVENT = 'company-profile-updated';
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({
     r_values: {
@@ -72,9 +74,7 @@ export default function SettingsPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isSavingCompany, setIsSavingCompany] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [companyMessage, setCompanyMessage] = useState<string | null>(null);
   const [companyLogo, setCompanyLogo] = useState<File | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<'owner' | 'admin' | 'member' | null>(null);
@@ -180,50 +180,33 @@ export default function SettingsPage() {
     setCompanyLogo(event.target.files?.[0] ?? null);
   };
 
-  const saveCompanyProfile = async () => {
-    const isWorkspaceAdmin = userRole === 'owner' || userRole === 'admin';
-    if (!isWorkspaceAdmin) {
-      alert('Workspace admin access required.');
-      return;
+  const saveCompanyProfileData = async () => {
+    const formData = new FormData();
+    formData.set('companyName', company.name.trim());
+    formData.set('legalName', company.legalName.trim());
+    formData.set('email', company.email.trim());
+    formData.set('phone', company.phone.trim());
+    formData.set('address', company.address.trim());
+    formData.set('website', company.website.trim());
+    formData.set('licenseNumber', company.licenseNumber.trim());
+    formData.set('quoteTerms', company.quoteTerms.trim());
+    if (companyLogo) formData.set('logo', companyLogo);
+
+    const response = await fetch('/api/company/bootstrap', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error ?? 'Failed to save company profile.');
     }
 
-    setIsSavingCompany(true);
-    setCompanyMessage(null);
-
-    try {
-      const formData = new FormData();
-      formData.set('companyName', company.name.trim());
-      formData.set('legalName', company.legalName.trim());
-      formData.set('email', company.email.trim());
-      formData.set('phone', company.phone.trim());
-      formData.set('address', company.address.trim());
-      formData.set('website', company.website.trim());
-      formData.set('licenseNumber', company.licenseNumber.trim());
-      formData.set('quoteTerms', company.quoteTerms.trim());
-      if (companyLogo) formData.set('logo', companyLogo);
-
-      const response = await fetch('/api/company/bootstrap', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data.error ?? 'Failed to save company profile.');
-      }
-
-      if (data.logoUrl) {
-        setCompany((prev) => ({ ...prev, logoUrl: data.logoUrl }));
-      }
-      setCompanyLogo(null);
-      setCompanyMessage('Company profile saved.');
-      setTimeout(() => setCompanyMessage(null), 3000);
-    } catch (error) {
-      console.error('Error saving company profile:', error);
-      alert(error instanceof Error ? error.message : 'Failed to save company profile.');
-    } finally {
-      setIsSavingCompany(false);
+    if (data.logoUrl) {
+      setCompany((prev) => ({ ...prev, logoUrl: data.logoUrl }));
     }
+    setCompanyLogo(null);
+    window.dispatchEvent(new Event(COMPANY_PROFILE_UPDATED_EVENT));
   };
 
   const createInvitation = async () => {
@@ -360,6 +343,8 @@ export default function SettingsPage() {
         throw new Error('Company workspace is required before saving settings.');
       }
 
+      await saveCompanyProfileData();
+
       const { error: rValuesError } = await supabase
         .from('settings')
         .upsert(
@@ -378,11 +363,11 @@ export default function SettingsPage() {
 
       if (pricingError) throw pricingError;
 
-      setSuccessMessage('Settings saved successfully!');
+      setSuccessMessage('Settings saved successfully.');
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (error) {
       console.error('Error saving settings:', error);
-      alert('Failed to save settings. Please try again.');
+      alert(error instanceof Error ? error.message : 'Failed to save settings. Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -466,11 +451,12 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="legal-name">Legal Name</Label>
+                    <Label htmlFor="legal-name">Name (optional)</Label>
                     <Input
                       id="legal-name"
                       value={company.legalName}
                       onChange={(event) => setCompany({ ...company, legalName: event.target.value })}
+                      placeholder="Optional contact or owner name"
                     />
                   </div>
                 </div>
@@ -551,18 +537,6 @@ export default function SettingsPage() {
                     onChange={handleCompanyLogoChange}
                     className="mt-3"
                   />
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <Button onClick={saveCompanyProfile} disabled={isSavingCompany || !company.name.trim()} className="ev-primary-action">
-                    {isSavingCompany ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Save className="mr-2 h-4 w-4" />
-                    )}
-                    Save Company Profile
-                  </Button>
-                  {companyMessage && <p className="text-sm text-[#47644a]">{companyMessage}</p>}
                 </div>
               </CardContent>
             </Card>
@@ -891,7 +865,7 @@ export default function SettingsPage() {
         </Tabs>
 
         <div className="flex items-center gap-4">
-          <Button onClick={saveSettings} disabled={isSaving || !isWorkspaceAdmin} className="ev-primary-action">
+          <Button onClick={saveSettings} disabled={isSaving || !isWorkspaceAdmin || !company.name.trim()} className="ev-primary-action">
             {isSaving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

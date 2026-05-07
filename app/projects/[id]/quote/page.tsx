@@ -7,7 +7,7 @@ import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatCurrency } from '@/lib/calculations/pricing';
-import { AlertCircle, ArrowLeft, Download, FileText, Loader2, Mail, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Download, Eye, FileText, Loader2, Plus, Trash2 } from 'lucide-react';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 import { resolveActiveMode } from '@/lib/extraction/resolveActiveMode';
 import {
@@ -600,6 +600,18 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
         throw new Error('Project not found');
       }
 
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('quote_terms')
+        .eq('id', companyId)
+        .maybeSingle();
+
+      const defaultQuoteTerms =
+        typeof companyData?.quote_terms === 'string' ? companyData.quote_terms.trim() : '';
+      if (defaultQuoteTerms) {
+        setTerms(defaultQuoteTerms);
+      }
+
       const { data: roomsData } = await supabase
         .from('rooms')
         .select('*')
@@ -956,6 +968,59 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       quantityLabel: totals.quantityLabel,
       total: totals.totalCost,
     };
+  };
+
+  const getQuoteFileName = () => {
+    const baseName = (project?.name || 'insulation-quote')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    return `${baseName || 'insulation-quote'}-quote.pdf`;
+  };
+
+  const getQuotePreviewUrl = () => {
+    if (!quote?.pdf_url && !quote?.download_url) return null;
+    return quote.download_url || quote.pdf_url;
+  };
+
+  const getQuoteDownloadUrl = () => {
+    if (!quote?.pdf_url && !quote?.download_url) return null;
+    const sourceUrl = quote.pdf_url || quote.download_url;
+    if (!sourceUrl) return null;
+
+    try {
+      const url = new URL(sourceUrl, window.location.origin);
+      if (url.pathname === '/api/storage/file') {
+        url.searchParams.set('download', '1');
+        url.searchParams.set('filename', getQuoteFileName());
+        return url.toString();
+      }
+    } catch {
+      // Fall through to the raw URL fallback.
+    }
+
+    return sourceUrl;
+  };
+
+  const previewQuotePdf = () => {
+    const previewUrl = getQuotePreviewUrl();
+    if (!previewUrl) return;
+    window.open(previewUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const downloadQuotePdf = () => {
+    const downloadUrl = getQuoteDownloadUrl();
+    if (!downloadUrl) return;
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = getQuoteFileName();
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   const handleGenerateQuote = async () => {
@@ -1456,30 +1521,19 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                     <Button
                       variant="outline"
                       className="ev-secondary-action w-full"
-                      onClick={() => {
-                        const downloadUrl =
-                          quote.download_url ||
-                          (quote.pdf_url?.startsWith('http')
-                            ? quote.pdf_url
-                            : `${window.location.origin}${quote.pdf_url}`);
-                        const subject = encodeURIComponent(
-                          `Insulation Quote - ${project?.name || 'Project'}`
-                        );
-                        const body = encodeURIComponent(
-                          `Please find the insulation quote attached.\n\nDownload: ${downloadUrl}`
-                        );
-                        window.open(`mailto:?subject=${subject}&body=${body}`);
-                      }}
+                      onClick={previewQuotePdf}
                     >
-                      <Mail className="mr-2 h-4 w-4" />
-                      Email Quote
+                      <Eye className="mr-2 h-4 w-4" />
+                      Preview PDF
                     </Button>
-                    <a href={quote.download_url || quote.pdf_url} target="_blank" rel="noopener noreferrer" className="block">
-                      <Button className="ev-primary-action w-full">
-                        <Download className="mr-2 h-4 w-4" />
-                        Download PDF
-                      </Button>
-                    </a>
+                    <Button
+                      type="button"
+                      className="ev-primary-action w-full"
+                      onClick={downloadQuotePdf}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download PDF
+                    </Button>
                   </div>
                 ) : null}
               </section>

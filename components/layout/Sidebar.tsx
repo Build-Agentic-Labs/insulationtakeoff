@@ -52,6 +52,8 @@ const navItems: NavItem[] = [
   },
 ];
 
+const COMPANY_PROFILE_UPDATED_EVENT = 'company-profile-updated';
+
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -92,14 +94,27 @@ export function Sidebar() {
 
     loadCompany();
 
+    const handleCompanyProfileUpdated = () => {
+      void loadCompany();
+    };
+    const handleFocus = () => {
+      void loadCompany();
+    };
+
+    window.addEventListener(COMPANY_PROFILE_UPDATED_EVENT, handleCompanyProfileUpdated);
+    window.addEventListener('focus', handleFocus);
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserEmail(session?.user.email ?? null);
+      void loadCompany();
     });
 
     return () => {
       active = false;
+      window.removeEventListener(COMPANY_PROFILE_UPDATED_EVENT, handleCompanyProfileUpdated);
+      window.removeEventListener('focus', handleFocus);
       subscription.unsubscribe();
     };
   }, []);

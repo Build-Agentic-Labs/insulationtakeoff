@@ -144,7 +144,12 @@ export function assertProjectStoragePath(path: string, companyId: string, projec
   }
 }
 
-export async function createSignedStorageUrl(value: string, companyId: string, expiresIn = 300): Promise<string> {
+export async function createSignedStorageUrl(
+  value: string,
+  companyId: string,
+  expiresIn = 300,
+  downloadName?: string,
+): Promise<string> {
   const path = getStoragePath(value);
   if (!path) {
     throw new Error('Invalid storage URL');
@@ -154,7 +159,7 @@ export async function createSignedStorageUrl(value: string, companyId: string, e
 
   const { data, error } = await supabaseAdmin.storage
     .from(BUCKET_NAME)
-    .createSignedUrl(path, expiresIn);
+    .createSignedUrl(path, expiresIn, downloadName ? { download: downloadName } : undefined);
 
   if (error || !data?.signedUrl) {
     throw new Error(error?.message || 'Failed to create signed file URL');

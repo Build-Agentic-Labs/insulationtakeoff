@@ -162,13 +162,13 @@ export default function CompanySetupPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="legalName" className="takeoff-mono text-[11px] text-[var(--takeoff-text-muted)]">
-                      Legal Name
+                      Name (optional)
                     </Label>
                     <Input
                       id="legalName"
                       value={legalName}
                       onChange={(event) => setLegalName(event.target.value)}
-                      placeholder="Optional"
+                      placeholder="Optional contact or owner name"
                       className="h-12 rounded-[16px] border-[var(--takeoff-line)] bg-white text-[15px]"
                     />
                   </div>

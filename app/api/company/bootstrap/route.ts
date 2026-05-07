@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       .from('companies')
       .update({
         name: companyName,
-        legal_name: legalName || companyName,
+        legal_name: legalName || null,
         email: email || user.email || null,
         phone: phone || null,
         address: address || null,
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     .from('companies')
     .insert({
       name: companyName,
-      legal_name: legalName || companyName,
+      legal_name: legalName || null,
       email: email || user.email || null,
       phone: phone || null,
       address: address || null,
