@@ -234,22 +234,22 @@ export default function SettingsPage() {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data.error ?? 'Failed to create invitation.');
+        throw new Error(data.error ?? 'Failed to add workspace user.');
       }
 
-      const emailSent = Boolean(data.emailSent);
-      const emailError = typeof data.emailError === 'string' ? data.emailError : null;
+      const requiresConfirmation = Boolean(data.requiresConfirmation);
+      const addedEmail = typeof data.member?.email === 'string' ? data.member.email : inviteEmail.trim();
 
       setInviteEmail('');
       setInviteRole('member');
       setTeamMessage(
-        emailSent
-          ? 'Invitation email sent through Supabase. The invite link is also shown below.'
-          : `Invitation created, but Supabase could not send the email${emailError ? `: ${emailError}` : '.'} Share the link below manually.`
+        requiresConfirmation
+          ? `${addedEmail} was added to this workspace, but the Supabase Auth email is still unconfirmed. Send the confirmation email from Supabase before they sign in.`
+          : `${addedEmail} was added to this workspace.`
       );
       await loadTeam();
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to create invitation.');
+      alert(error instanceof Error ? error.message : 'Failed to add workspace user.');
     } finally {
       setIsInviting(false);
     }
@@ -589,9 +589,9 @@ export default function SettingsPage() {
                       <UserPlus className="h-5 w-5 text-[var(--takeoff-ink)]" />
                     </span>
                     <div>
-                      <p className="font-semibold text-[var(--takeoff-ink)]">Invite teammate</p>
+                      <p className="font-semibold text-[var(--takeoff-ink)]">Add Supabase user</p>
                       <p className="text-sm text-[var(--takeoff-text-muted)]">
-                        Send a Supabase email link and keep a manual invite link as backup.
+                        Create the user in Supabase Auth first, then add that exact email to this workspace. No public signup or invite email is sent.
                       </p>
                     </div>
                   </div>
@@ -613,7 +613,7 @@ export default function SettingsPage() {
                     </select>
                     <Button onClick={createInvitation} disabled={isInviting || !inviteEmail.trim()} className="ev-primary-action">
                       {isInviting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
-                      Invite
+                      Add User
                     </Button>
                   </div>
                 </div>
@@ -650,7 +650,7 @@ export default function SettingsPage() {
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-[var(--takeoff-ink)]">Pending Invites</h3>
+                    <h3 className="font-semibold text-[var(--takeoff-ink)]">Pending Invite Links</h3>
                     <span className="takeoff-mono text-xs text-[var(--takeoff-text-muted)]">{teamInvitations.length} pending</span>
                   </div>
                   {teamInvitations.length === 0 ? (

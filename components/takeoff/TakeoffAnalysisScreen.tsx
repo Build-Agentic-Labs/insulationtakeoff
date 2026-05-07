@@ -7,6 +7,7 @@ import {
   Expand,
   FileSearch,
   Loader2,
+  RefreshCw,
   ScanSearch,
   Sparkles,
 } from 'lucide-react';
@@ -46,6 +47,7 @@ interface TakeoffAnalysisScreenProps {
     detailPagesCompleted: number;
     detailPagesTotal: number;
   } | null;
+  onRetryScan: () => void;
   onContinue: (scores: PageScore[]) => void;
 }
 
@@ -564,6 +566,7 @@ export function TakeoffAnalysisScreen({
   classificationDone,
   classificationError,
   analysisProgress,
+  onRetryScan,
   onContinue,
 }: TakeoffAnalysisScreenProps) {
   const [localPageScores, setLocalPageScores] = useState<PageScore[]>([]);
@@ -803,6 +806,17 @@ export function TakeoffAnalysisScreen({
             <span className="rounded-full border border-[var(--takeoff-line)] bg-white px-2 py-1">
               {detailExtractPages.length} details
             </span>
+            {classificationError && (
+              <button
+                type="button"
+                onClick={onRetryScan}
+                disabled={isClassifying}
+                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[var(--takeoff-line-strong)] bg-white px-2.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--takeoff-ink)] transition-colors hover:border-[#9eb29d] hover:bg-[var(--takeoff-paper)] disabled:cursor-wait disabled:border-[var(--takeoff-line)] disabled:text-[var(--takeoff-text-subtle)]"
+              >
+                <RefreshCw className={`h-3 w-3 ${isClassifying ? 'animate-spin' : ''}`} />
+                {isClassifying ? 'Scanning' : 'Retry scan'}
+              </button>
+            )}
           </div>
         </div>
 

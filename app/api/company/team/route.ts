@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { User } from '@supabase/supabase-js';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { requireServerCompanyAdmin, requireServerCompanyMembership } from '@/lib/supabase/company-server';
 import { AuthRequiredError, CompanyRoleRequiredError } from '@/lib/supabase/company';
@@ -12,6 +13,27 @@ function normalizeEmail(email: unknown) {
 
 function isInviteRole(role: unknown): role is InviteRole {
   return role === 'admin' || role === 'member';
+}
+
+function isAuthUserConfirmed(user: User) {
+  return Boolean(user.email_confirmed_at || user.confirmed_at);
+}
+
+async function findAuthUserByEmail(email: string) {
+  const normalizedEmail = normalizeEmail(email);
+  const perPage = 100;
+
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+    if (error) return { user: null, error };
+
+    const user = data.users.find((candidate) => normalizeEmail(candidate.email) === normalizedEmail);
+    if (user) return { user, error: null };
+
+    if (data.users.length < perPage) break;
+  }
+
+  return { user: null, error: null };
 }
 
 function teamErrorResponse(error: unknown, fallback: string) {
@@ -82,7 +104,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { companyId, user } = await requireServerCompanyAdmin();
+    const { companyId } = await requireServerCompanyAdmin();
     const body = await request.json();
     const email = normalizeEmail(body.email);
     const role = isInviteRole(body.role) ? body.role : 'member';
@@ -91,61 +113,65 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
     }
 
-    const { data: existingInvites } = await supabaseAdmin
-      .from('company_invitations')
+    const { user: authUser, error: authUserError } = await findAuthUserByEmail(email);
+
+    if (authUserError) {
+      return NextResponse.json({ error: authUserError.message }, { status: 500 });
+    }
+
+    if (!authUser) {
+      return NextResponse.json(
+        { error: 'Create this user in Supabase Auth first, then add them to the workspace.' },
+        { status: 404 }
+      );
+    }
+
+    const { data: existingMember, error: existingMemberError } = await supabaseAdmin
+      .from('company_members')
       .select('id')
       .eq('company_id', companyId)
-      .ilike('email', email)
-      .is('accepted_at', null)
-      .gt('expires_at', new Date().toISOString())
-      .limit(1);
+      .eq('user_id', authUser.id)
+      .maybeSingle();
 
-    if (existingInvites && existingInvites.length > 0) {
-      return NextResponse.json({ error: 'This email already has a pending invite.' }, { status: 409 });
+    if (existingMemberError) {
+      return NextResponse.json({ error: existingMemberError.message }, { status: 500 });
     }
 
-    const { data: company, error: companyError } = await supabaseAdmin
-      .from('companies')
-      .select('name')
-      .eq('id', companyId)
-      .single();
-
-    if (companyError || !company) {
-      return NextResponse.json({ error: 'Company profile not found.' }, { status: 404 });
+    if (existingMember) {
+      return NextResponse.json({ error: 'This user is already a workspace member.' }, { status: 409 });
     }
 
-    const { data: invitation, error: inviteError } = await supabaseAdmin
-      .from('company_invitations')
+    const { data: member, error: memberError } = await supabaseAdmin
+      .from('company_members')
       .insert({
         company_id: companyId,
-        email,
+        user_id: authUser.id,
         role,
-        invited_by: user.id,
       })
-      .select('id, email, role, token, expires_at, created_at')
+      .select('id, user_id, role, created_at')
       .single();
 
-    if (inviteError) {
-      return NextResponse.json({ error: inviteError.message }, { status: 500 });
+    if (memberError) {
+      return NextResponse.json({ error: memberError.message }, { status: 500 });
     }
 
-    const inviteUrl = new URL(`/company/invite/${invitation.token}`, request.nextUrl.origin).toString();
-    const { error: emailError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-      redirectTo: inviteUrl,
-      data: {
-        company_name: company.name,
-        companyName: company.name,
-      },
-    });
+    await supabaseAdmin
+      .from('company_invitations')
+      .delete()
+      .eq('company_id', companyId)
+      .ilike('email', email)
+      .is('accepted_at', null);
 
     return NextResponse.json({
-      invitation,
-      inviteUrl,
-      emailSent: !emailError,
-      emailError: emailError?.message ?? null,
+      member: {
+        ...member,
+        email: authUser.email ?? email,
+      },
+      memberAdded: true,
+      requiresConfirmation: !isAuthUserConfirmed(authUser),
     });
   } catch (error) {
-    return teamErrorResponse(error, 'Unable to create invitation');
+    return teamErrorResponse(error, 'Unable to add workspace user');
   }
 }
 

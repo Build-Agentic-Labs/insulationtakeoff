@@ -59,10 +59,11 @@ export async function updateAuthSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const isLoginRoute = pathname === '/login';
+  const isAuthRoute = pathname.startsWith('/auth/');
   const isCompanySetupRoute = pathname === '/company/setup';
   const isCompanyInviteRoute = pathname.startsWith('/company/invite/');
 
-  if (!user && !isLoginRoute) {
+  if (!user && !isLoginRoute && !isAuthRoute) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = '/login';
     redirectUrl.searchParams.set('next', pathname + request.nextUrl.search);
@@ -76,7 +77,7 @@ export async function updateAuthSession(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (user && !isCompanySetupRoute && !isCompanyInviteRoute) {
+  if (user && !isCompanySetupRoute && !isCompanyInviteRoute && !isAuthRoute) {
     const { data: memberships, error: membershipError } = await supabase
       .from('company_members')
       .select('company_id, company:companies(onboarding_completed)')

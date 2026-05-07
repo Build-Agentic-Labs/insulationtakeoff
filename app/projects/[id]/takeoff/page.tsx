@@ -79,6 +79,10 @@ interface VisionAnalysisProgress {
   detailPagesTotal: number;
 }
 
+interface ClassifyPagesOptions {
+  force?: boolean;
+}
+
 function hasMeaningfulClassificationResults(
   results: PageClassification[],
   totalPages: number,
@@ -1023,6 +1027,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   const [classificationError, setClassificationError] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState<VisionAnalysisProgress | null>(null);
   const [classifications, setClassifications] = useState<PageClassification[]>([]);
+  const [visionScanRunId, setVisionScanRunId] = useState(0);
   const classifyStartedRef = useRef(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const lastSessionVersionRef = useRef<string | null>(null);
@@ -1057,6 +1062,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       setAnalysisProgress(null);
       setIsClassifying(false);
       setTotalPages(0);
+      setVisionScanRunId(0);
       classifyStartedRef.current = false;
 
       try {
@@ -1166,11 +1172,12 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   }, [projectRef]);
 
   // ── Classify pages with Vision AI (cached per document) ─────────────────────
-  const classifyPages = useCallback(async (url: string) => {
+  const classifyPages = useCallback(async (url: string, options: ClassifyPagesOptions = {}) => {
     if (classifyStartedRef.current) return;
     classifyStartedRef.current = true;
 
     setClassificationError(null);
+    setClassificationDone(false);
     setAnalysisProgress(
       makeAnalysisProgress({
         stage: 'loading_pdf',
@@ -1190,23 +1197,27 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       const cacheKey = `takeoff_classify_v8_${documentId}_${numPages}`;
 
       try {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) {
-          const results: PageClassification[] = JSON.parse(cached);
-          if (hasMeaningfulClassificationResults(results, numPages)) {
-            setClassifications(results);
-            setClassificationDone(true);
-            setAnalysisProgress(
-              makeAnalysisProgress({
-                stage: 'complete',
-                message: 'Loaded cached vision results',
-                progress: 100,
-                totalPages: numPages,
-              })
-            );
-            return;
-          }
+        if (options.force) {
           localStorage.removeItem(cacheKey);
+        } else {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            const results: PageClassification[] = JSON.parse(cached);
+            if (hasMeaningfulClassificationResults(results, numPages)) {
+              setClassifications(results);
+              setClassificationDone(true);
+              setAnalysisProgress(
+                makeAnalysisProgress({
+                  stage: 'complete',
+                  message: 'Loaded cached vision results',
+                  progress: 100,
+                  totalPages: numPages,
+                })
+              );
+              return;
+            }
+            localStorage.removeItem(cacheKey);
+          }
         }
       } catch {}
 
@@ -1448,6 +1459,18 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     }
   }, [documentId]);
 
+  const handleRetryVisionScan = useCallback(() => {
+    if (!pdfUrl || !documentId || isClassifying || !classificationError) return;
+
+    classifyStartedRef.current = false;
+    setVisionScanRunId((value) => value + 1);
+    setClassifications([]);
+    setClassificationDone(false);
+    setClassificationError(null);
+    setPageScoresStore([]);
+    void classifyPages(pdfUrl, { force: true });
+  }, [classificationError, classifyPages, documentId, isClassifying, pdfUrl, setPageScoresStore]);
+
   useEffect(() => {
     if (isLoading || !pdfUrl || !documentId) return;
 
@@ -1659,7 +1682,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
 
   const handleHeaderNext = useCallback(() => {
     if (flowStep === 'analysis') {
-      if (session) {
+      if (session && classificationDone && !classificationError && !isClassifying) {
         setStep('zones');
       }
       return;
@@ -1673,7 +1696,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     if (flowStep === 'workspace') {
       setStep('summary');
     }
-  }, [flowStep, session, setStep]);
+  }, [classificationDone, classificationError, flowStep, isClassifying, session, setStep]);
 
   const handleSummaryHeaderContinue = useCallback(async () => {
     if (isSummaryContinuing) return;
@@ -1845,7 +1868,10 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
           ) : (
             <button
               onClick={handleHeaderNext}
-              disabled={flowStep === 'analysis' && !session}
+              disabled={
+                flowStep === 'analysis' &&
+                (!session || isClassifying || !classificationDone || Boolean(classificationError))
+              }
               className="takeoff-mono inline-flex h-8 items-center gap-1.5 rounded-[12px] border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-3.5 text-[10px] font-semibold text-white shadow-[0_8px_24px_rgba(31,39,33,0.18)] transition-[background-color,border-color,box-shadow,transform] hover:-translate-y-[1px] hover:bg-[#202621] hover:shadow-[0_10px_28px_rgba(31,39,33,0.22)] disabled:cursor-not-allowed disabled:border-[var(--takeoff-line)] disabled:bg-[var(--takeoff-paper)] disabled:text-[var(--takeoff-text-subtle)] disabled:shadow-none disabled:hover:translate-y-0"
             >
               Next step
@@ -1867,6 +1893,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         {(currentStep === 'analysis' || currentStep === 'page-selection') && (
           <div className="h-full" data-tour="takeoff-content-analysis">
             <TakeoffAnalysisScreen
+              key={visionScanRunId}
               pdfUrl={pdfUrl}
               totalPages={totalPages}
               pageScores={pageScores}
@@ -1874,6 +1901,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
               classificationDone={classificationDone}
               classificationError={classificationError}
               analysisProgress={analysisProgress}
+              onRetryScan={handleRetryVisionScan}
               onContinue={handleConfirmPageSelection}
             />
           </div>

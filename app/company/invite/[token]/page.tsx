@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { supabase } from '@/lib/supabase/client';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 
 export default function CompanyInvitePage() {
@@ -13,6 +14,21 @@ export default function CompanyInvitePage() {
 
   useEffect(() => {
     const acceptInvitation = async () => {
+      const authCode = new URLSearchParams(window.location.search).get('code');
+
+      if (authCode) {
+        setMessage('Confirming invitation...');
+        const { error } = await supabase.auth.exchangeCodeForSession(authCode);
+
+        if (error) {
+          setStatus('error');
+          setMessage(error.message);
+          return;
+        }
+
+        window.history.replaceState(null, '', `/company/invite/${params.token}`);
+      }
+
       const response = await fetch('/api/company/invitations/accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

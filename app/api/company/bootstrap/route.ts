@@ -86,6 +86,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ companyId, logoUrl });
   }
 
+  const { count: companyCount, error: companyCountError } = await supabaseAdmin
+    .from('companies')
+    .select('id', { count: 'exact', head: true });
+
+  if (companyCountError) {
+    return NextResponse.json({ error: companyCountError.message }, { status: 500 });
+  }
+
+  if ((companyCount ?? 0) > 0) {
+    return NextResponse.json(
+      { error: 'Workspace access required. Ask an owner or admin to add this Supabase Auth user to the company workspace.' },
+      { status: 403 }
+    );
+  }
+
   const { data: createdCompany, error: createCompanyError } = await supabaseAdmin
     .from('companies')
     .insert({

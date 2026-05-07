@@ -6,7 +6,25 @@ import { supabase } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertCircle, Building2, Loader2, LogIn } from 'lucide-react';
+import { AlertCircle, Building2, CheckCircle2, Loader2, LogIn } from 'lucide-react';
+
+function getAuthRedirectErrorMessage(errorCode: string, details: string | null) {
+  if (details) return details;
+
+  if (errorCode === 'auth_callback_failed') {
+    return 'The authentication link could not be completed. Try signing in again or request a new confirmation email.';
+  }
+
+  if (errorCode === 'auth_confirmation_failed') {
+    return 'The confirmation link could not be completed. It may have expired or already been used.';
+  }
+
+  if (errorCode === 'missing_auth_token') {
+    return 'The authentication link is missing its confirmation token.';
+  }
+
+  return 'Authentication could not be completed.';
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,17 +33,29 @@ export default function LoginPage() {
   const [nextPath, setNextPath] = useState('/');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requestedNext = params.get('next');
+    const authError = params.get('error');
     setNextPath(requestedNext?.startsWith('/') ? requestedNext : '/');
+
+    if (authError) {
+      setError(getAuthRedirectErrorMessage(authError, params.get('details')));
+      return;
+    }
+
+    if (params.get('message') === 'email_confirmed') {
+      setNotice('Email confirmed. Sign in to continue.');
+    }
   }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    setNotice(null);
 
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -89,6 +119,13 @@ export default function LoginPage() {
                   <div className="mt-6 flex gap-3 rounded-[18px] border border-[#efc4c8] bg-[#fff5f5] px-4 py-3 text-[13px] text-[#a3151d]">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>{error}</span>
+                  </div>
+                )}
+
+                {notice && (
+                  <div className="mt-6 flex gap-3 rounded-[18px] border border-[#c7d9c1] bg-[#f3f8f1] px-4 py-3 text-[13px] text-[#47644a]">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{notice}</span>
                   </div>
                 )}
 
