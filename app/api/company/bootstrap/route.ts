@@ -16,10 +16,16 @@ export async function POST(request: NextRequest) {
   const website = String(formData.get('website') ?? '').trim();
   const licenseNumber = String(formData.get('licenseNumber') ?? '').trim();
   const quoteTerms = String(formData.get('quoteTerms') ?? '').trim();
+  const defaultTaxRateRaw = String(formData.get('defaultTaxRate') ?? '0').trim().replace(',', '.');
+  const defaultTaxRate = defaultTaxRateRaw ? Number(defaultTaxRateRaw) : 0;
   const logo = formData.get('logo');
 
   if (!companyName) {
     return NextResponse.json({ error: 'Company name is required' }, { status: 400 });
+  }
+
+  if (!Number.isFinite(defaultTaxRate) || defaultTaxRate < 0 || defaultTaxRate > 100) {
+    return NextResponse.json({ error: 'Default tax rate must be between 0 and 100 percent' }, { status: 400 });
   }
 
   if (logo instanceof File && logo.size > 0) {
@@ -64,6 +70,7 @@ export async function POST(request: NextRequest) {
         website: website || null,
         license_number: licenseNumber || null,
         quote_terms: quoteTerms || null,
+        default_tax_rate: defaultTaxRate,
         onboarding_completed: true,
         onboarding_completed_at: new Date().toISOString(),
       })
@@ -90,6 +97,7 @@ export async function POST(request: NextRequest) {
       website: website || null,
       license_number: licenseNumber || null,
       quote_terms: quoteTerms || null,
+      default_tax_rate: defaultTaxRate,
       onboarding_completed: true,
       onboarding_completed_at: new Date().toISOString(),
       created_by: user.id,

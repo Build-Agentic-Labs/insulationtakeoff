@@ -10,7 +10,7 @@ import { useTakeoffStore } from '@/lib/stores/takeoff-store';
 import { TakeoffAnalysisScreen } from '@/components/takeoff/TakeoffAnalysisScreen';
 import { ToolbarConceptWorkspace } from '@/components/takeoff/ToolbarConceptWorkspace';
 import { ZoneToolbarWorkspace } from '@/components/takeoff/ZoneToolbarWorkspace';
-import { TakeoffSummary } from '@/components/takeoff/TakeoffSummary';
+import { TakeoffSummary, type TakeoffSummaryHandle } from '@/components/takeoff/TakeoffSummary';
 import { TakeoffGuideTour } from '@/components/takeoff/TakeoffGuideTour';
 import { usePreventHistoryBack } from '@/components/takeoff/usePreventHistoryBack';
 import { registerPersistedSessionRevision, saveSession } from '@/lib/takeoff/save-session';
@@ -1037,6 +1037,8 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [guideReplaySignal, setGuideReplaySignal] = useState(0);
+  const summaryRef = useRef<TakeoffSummaryHandle | null>(null);
+  const [isSummaryContinuing, setIsSummaryContinuing] = useState(false);
 
   // ── Load document on mount ─────────────────────────────────────────────────
   useEffect(() => {
@@ -1673,6 +1675,17 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     }
   }, [flowStep, session, setStep]);
 
+  const handleSummaryHeaderContinue = useCallback(async () => {
+    if (isSummaryContinuing) return;
+
+    setIsSummaryContinuing(true);
+    try {
+      await summaryRef.current?.continueToQuote();
+    } finally {
+      setIsSummaryContinuing(false);
+    }
+  }, [isSummaryContinuing]);
+
   useEffect(() => {
     if ((flowStep !== 'zones' && flowStep !== 'workspace') || !session) return;
 
@@ -1817,7 +1830,19 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
             </button>
           )}
 
-          {flowStep !== 'summary' && (
+          {flowStep === 'summary' ? (
+            <button
+              onClick={handleSummaryHeaderContinue}
+              disabled={!session || isSummaryContinuing}
+              className="takeoff-mono inline-flex h-8 items-center gap-1.5 rounded-[12px] border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-3.5 text-[10px] font-semibold text-white shadow-[0_8px_24px_rgba(31,39,33,0.18)] transition-[background-color,border-color,box-shadow,transform] hover:-translate-y-[1px] hover:bg-[#202621] hover:shadow-[0_10px_28px_rgba(31,39,33,0.22)] disabled:cursor-not-allowed disabled:border-[var(--takeoff-line)] disabled:bg-[var(--takeoff-paper)] disabled:text-[var(--takeoff-text-subtle)] disabled:shadow-none disabled:hover:translate-y-0"
+            >
+              {isSummaryContinuing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              {isSummaryContinuing ? 'Saving...' : 'Continue'}
+              {!isSummaryContinuing ? <ArrowRight className="h-3.5 w-3.5" /> : null}
+            </button>
+          ) : (
             <button
               onClick={handleHeaderNext}
               disabled={flowStep === 'analysis' && !session}
@@ -1869,8 +1894,8 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         {currentStep === 'summary' && session && (
           <div className="h-full" data-tour="takeoff-content-summary">
             <TakeoffSummary
+              ref={summaryRef}
               session={session}
-              onBack={() => setStep('workspace')}
               onContinue={() => router.push(getQuoteHref(projectRouteRef, 'takeoff'))}
             />
           </div>

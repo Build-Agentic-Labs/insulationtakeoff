@@ -2665,10 +2665,19 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
                   visibleZones.map((zone) => {
                     const zoneLifecycle = deriveZoneLifecycleState(zone);
                     return (
-                      <button
+                      <div
                         key={`zone-task-${zone.id}`}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => handleSelectZone(zone.id)}
-                        className={`group relative w-full border px-2.5 py-1.5 text-left transition-colors ${
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleSelectZone(zone.id);
+                          }
+                        }}
+                        className={`group relative w-full cursor-pointer border px-2.5 py-1.5 text-left transition-colors ${
                           selectedZone?.id === zone.id
                             ? 'border-[var(--takeoff-ink)] bg-[rgba(255,255,255,0.98)]'
                             : 'border-[var(--takeoff-line)] bg-white hover:border-[#9eb29d]'
@@ -2695,6 +2704,7 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
                         {zoneLifecycle === 'needs_takeoff' && (
                           <div className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center opacity-0 transition-opacity group-hover:opacity-100">
                             <button
+                              type="button"
                               onClick={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
@@ -2707,7 +2717,7 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
                             </button>
                           </div>
                         )}
-                      </button>
+                      </div>
                     );
                   })
                 ) : (

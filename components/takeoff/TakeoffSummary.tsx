@@ -1,7 +1,7 @@
 'use client';
 
-import { ArrowRight, ChevronLeft, CirclePlus, Trash2 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CirclePlus, Trash2 } from 'lucide-react';
+import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   formatFeetInches,
   type AssemblyScope,
@@ -26,8 +26,11 @@ import {
 
 interface TakeoffSummaryProps {
   session: TakeoffSession;
-  onBack: () => void;
   onContinue: () => void | Promise<void>;
+}
+
+export interface TakeoffSummaryHandle {
+  continueToQuote: () => Promise<void>;
 }
 
 type EstimateRow = EstimateWorksheetRow;
@@ -82,6 +85,53 @@ function formatNumber(value: number): string {
   return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '0';
 }
 
+function extractRValueLabels(value: string): string[] {
+  return Array.from(value.matchAll(/\bR\s*-?\s*(\d+(?:\.\d+)?)\b/gi))
+    .map((match) => `r-${Number.parseFloat(match[1])}`)
+    .filter((value, index, items) => items.indexOf(value) === index);
+}
+
+function standaloneRValueKey(value: string): string | null {
+  const labels = extractRValueLabels(value);
+  if (labels.length !== 1) return null;
+
+  const compactValue = value.toLowerCase().replace(/\s+/g, '').replace(/^r(?=\d)/, 'r-');
+  return compactValue === labels[0] ? labels[0] : null;
+}
+
+function normalizeEstimateSpec(value: string): string {
+  const parts = value
+    .split('·')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const contextualRValues = new Set(
+    parts.flatMap((part) => (standaloneRValueKey(part) ? [] : extractRValueLabels(part))),
+  );
+  const seenParts = new Set<string>();
+  const seenRValues = new Set<string>();
+  const normalizedParts: string[] = [];
+
+  for (const part of parts) {
+    const partKey = part.toLowerCase().replace(/\s+/g, ' ');
+    if (seenParts.has(partKey)) continue;
+
+    const standaloneKey = standaloneRValueKey(part);
+    if (standaloneKey && (contextualRValues.has(standaloneKey) || seenRValues.has(standaloneKey))) {
+      continue;
+    }
+
+    normalizedParts.push(part);
+    seenParts.add(partKey);
+    extractRValueLabels(part).forEach((label) => seenRValues.add(label));
+  }
+
+  return normalizedParts.join(' · ');
+}
+
+function normalizeEstimateRowSpecs(rows: EstimateRow[]): EstimateRow[] {
+  return rows.map((row) => ({ ...row, spec: normalizeEstimateSpec(row.spec) }));
+}
+
 function formatZoneSpec(
   insulationType?: string | null,
   rValue?: string | null,
@@ -90,7 +140,7 @@ function formatZoneSpec(
   const parts = [floorLabel?.trim(), insulationType?.trim(), rValue?.trim()].filter(
     (value, index, items) => Boolean(value) && items.indexOf(value) === index,
   );
-  return parts.join(' · ');
+  return normalizeEstimateSpec(parts.join(' · '));
 }
 
 function uniqueList(values: Array<string | null | undefined>): string[] {
@@ -137,7 +187,7 @@ function firstSpecForScope(
   optionsByScope: Map<VisionZoneKey, string[]>,
   scope: VisionZoneKey | null,
 ): string {
-  return scope ? optionsByScope.get(scope)?.[0] ?? '' : '';
+  return scope ? normalizeEstimateSpec(optionsByScope.get(scope)?.[0] ?? '') : '';
 }
 
 function buildVisionSpecOptions(session: TakeoffSession): Map<VisionZoneKey, string[]> {
@@ -167,19 +217,6 @@ function buildVisionSpecOptions(session: TakeoffSession): Map<VisionZoneKey, str
   }
 
   return optionsByScope;
-}
-
-function sameRow(a: EstimateRow, b: EstimateRow): boolean {
-  return (
-    a.group === b.group &&
-    a.label === b.label &&
-    a.quantity === b.quantity &&
-    a.unit === b.unit &&
-    a.spec === b.spec &&
-    a.note === b.note &&
-    a.source === b.source &&
-    a.enabled === b.enabled
-  );
 }
 
 function zonePolygonAreaSf(points: PdfPoint[], calibration: Calibration | undefined): number {
@@ -312,7 +349,9 @@ function buildDerivedEstimateRows(session: TakeoffSession): EstimateRow[] {
       label: area.label,
       quantity,
       unit,
-      spec: firstSpecForScope(visionSpecOptions, visionScopeForSummaryAreaId(area.id)),
+      spec: normalizeEstimateSpec(
+        firstSpecForScope(visionSpecOptions, visionScopeForSummaryAreaId(area.id)),
+      ),
       note: area.description,
       source: 'takeoff',
       enabled: true,
@@ -360,8 +399,10 @@ function buildDerivedEstimateRows(session: TakeoffSession): EstimateRow[] {
       quantity: normalizeQuantity(areaSf),
       unit: 'SF',
       spec:
-        formatZoneSpec(zone.insulationType, zone.rValue, zone.floorLabel) ||
-        firstSpecForScope(visionSpecOptions, isCrawl ? 'crawlspace' : 'attic'),
+        normalizeEstimateSpec(
+          formatZoneSpec(zone.insulationType, zone.rValue, zone.floorLabel) ||
+          firstSpecForScope(visionSpecOptions, isCrawl ? 'crawlspace' : 'attic'),
+        ),
       note: `${isCrawl ? 'Floor area' : isVaultedAttic ? 'Vaulted area' : 'Zone area'} traced on page ${zone.pageIndex + 1}${pitchNote}`,
       source: 'takeoff',
       enabled: true,
@@ -384,13 +425,16 @@ function mergeRows(derivedRows: EstimateRow[], persistedRows: EstimateRow[]): Es
       ? {
           ...row,
           label: persisted.label?.trim() ? persisted.label : row.label,
-          spec: persisted.spec?.trim() ? persisted.spec : row.spec,
+          spec: normalizeEstimateSpec(persisted.spec?.trim() ? persisted.spec : row.spec),
           enabled: persisted.enabled,
         }
-      : row;
+      : { ...row, spec: normalizeEstimateSpec(row.spec) };
   });
 
-  return [...mergedDerived, ...manualRows].sort((left, right) => {
+  return normalizeEstimateRowSpecs([
+    ...mergedDerived,
+    ...manualRows,
+  ]).sort((left, right) => {
     const groupDelta = GROUP_ORDER.indexOf(left.group) - GROUP_ORDER.indexOf(right.group);
     if (groupDelta !== 0) return groupDelta;
     return left.label.localeCompare(right.label);
@@ -507,6 +551,7 @@ function GroupCard({
                       list={specOptions.length > 0 ? specListId : undefined}
                       value={row.spec}
                       onChange={(event) => onUpdate(row.id, { spec: event.target.value })}
+                      onBlur={() => onUpdate(row.id, { spec: normalizeEstimateSpec(row.spec) })}
                       placeholder={specOptions.length > 0 ? 'Select or type spec' : 'Spec or assembly'}
                       className="w-full rounded-[10px] border border-[var(--takeoff-line)] bg-white px-3 py-2 text-[13px] text-[var(--takeoff-ink)] focus:border-[var(--takeoff-line-strong)] focus:outline-none"
                     />
@@ -579,19 +624,14 @@ function GroupCard({
   );
 }
 
-export function TakeoffSummary({
+export const TakeoffSummary = forwardRef<TakeoffSummaryHandle, TakeoffSummaryProps>(function TakeoffSummary({
   session,
-  onBack,
   onContinue,
-}: TakeoffSummaryProps) {
+}, ref) {
   const storageKey = `${STORAGE_PREFIX}${session.id}`;
   const derivedRows = useMemo(() => buildDerivedEstimateRows(session), [session]);
   const deductionsByParentId = useMemo(() => buildOpeningDeductionMap(session), [session]);
   const visionSpecOptions = useMemo(() => buildVisionSpecOptions(session), [session]);
-  const derivedRowById = useMemo(
-    () => new Map(derivedRows.map((row) => [row.id, row])),
-    [derivedRows],
-  );
 
   const [estimateRows, setEstimateRows] = useState<EstimateRow[]>(derivedRows);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -616,8 +656,9 @@ export function TakeoffSummary({
       }
     }
 
-    setEstimateRows(nextRows);
-    lastSavedRowsRef.current = JSON.stringify(nextRows);
+    const normalizedRows = normalizeEstimateRowSpecs(nextRows);
+    setEstimateRows(normalizedRows);
+    lastSavedRowsRef.current = JSON.stringify(normalizedRows);
     hydratedSessionIdRef.current = session.id;
     setSaveStatus('saved');
     setSaveError(null);
@@ -625,6 +666,7 @@ export function TakeoffSummary({
 
   const persistEstimateRows = useCallback(
     async (rows: EstimateRow[]) => {
+      const normalizedRows = normalizeEstimateRowSpecs(rows);
       setSaveStatus('saving');
       setSaveError(null);
 
@@ -632,7 +674,7 @@ export function TakeoffSummary({
         const response = await fetch(`/api/takeoff/sessions/${session.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ estimate_rows: rows }),
+          body: JSON.stringify({ estimate_rows: normalizedRows }),
         });
 
         if (!response.ok) {
@@ -640,7 +682,8 @@ export function TakeoffSummary({
           throw new Error(typeof data?.error === 'string' ? data.error : 'Failed to save worksheet');
         }
 
-        lastSavedRowsRef.current = JSON.stringify(rows);
+        lastSavedRowsRef.current = JSON.stringify(normalizedRows);
+        setEstimateRows(normalizedRows);
         setSaveStatus('saved');
         return true;
       } catch (error) {
@@ -678,21 +721,6 @@ export function TakeoffSummary({
     };
   }, [estimateRows, persistEstimateRows, session.id]);
 
-  const enabledRows = estimateRows.filter((row) => row.enabled);
-  const enabledSf = enabledRows
-    .filter((row) => row.unit === 'SF')
-    .reduce((sum, row) => sum + row.quantity, 0);
-  const enabledLf = enabledRows
-    .filter((row) => row.unit === 'LF')
-    .reduce((sum, row) => sum + row.quantity, 0);
-  const enabledEa = enabledRows
-    .filter((row) => row.unit === 'EA')
-    .reduce((sum, row) => sum + row.quantity, 0);
-  const adjustedRows = estimateRows.filter((row) => {
-    const baseline = derivedRowById.get(row.id);
-    return baseline ? !sameRow(row, baseline) : row.source === 'manual';
-  });
-
   const groupedRows = useMemo(
     () =>
       GROUP_ORDER.map((group) => ({
@@ -727,7 +755,7 @@ export function TakeoffSummary({
     setEstimateRows((current) => current.filter((row) => row.id !== id));
   };
 
-  const handleContinue = async () => {
+  const handleContinue = useCallback(async () => {
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -737,7 +765,11 @@ export function TakeoffSummary({
     if (ok) {
       await onContinue();
     }
-  };
+  }, [estimateRows, onContinue, persistEstimateRows]);
+
+  useImperativeHandle(ref, () => ({
+    continueToQuote: handleContinue,
+  }), [handleContinue]);
 
   return (
     <div className="takeoff-shell takeoff-light-theme h-full overflow-hidden text-[var(--takeoff-ink)]">
@@ -751,44 +783,6 @@ export function TakeoffSummary({
               <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.04em] text-[var(--takeoff-ink)]">
                 Review estimate worksheet
               </h1>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="takeoff-mono rounded-full border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-3 py-1.5 text-[10px] font-semibold text-[var(--takeoff-text-muted)]">
-                {formatNumber(enabledSf)} SF
-                {enabledLf > 0 ? ` · ${formatNumber(enabledLf)} LF` : ''}
-                {enabledEa > 0 ? ` · ${formatNumber(enabledEa)} EA` : ''}
-              </div>
-              <div className="takeoff-mono rounded-full border border-[var(--takeoff-line)] bg-white px-3 py-1.5 text-[10px] font-semibold text-[var(--takeoff-text-muted)]">
-                {estimateRows.length} items
-                {adjustedRows.length > 0 ? ` · ${adjustedRows.length} adjusted` : ''}
-              </div>
-              <div className={`takeoff-mono rounded-full border px-3 py-1.5 text-[10px] font-semibold ${
-                saveStatus === 'error'
-                  ? 'border-[#ef4444]/30 bg-[#fef2f2] text-[#dc2626]'
-                  : 'border-[var(--takeoff-line)] bg-white text-[var(--takeoff-text-muted)]'
-              }`}>
-                {saveStatus === 'saving'
-                  ? 'Saving worksheet'
-                  : saveStatus === 'error'
-                    ? 'Save failed'
-                    : 'Worksheet saved'}
-              </div>
-              <button
-                onClick={onBack}
-                className="takeoff-mono inline-flex items-center gap-2 rounded-full border border-[var(--takeoff-line)] bg-white px-4 py-2 text-[12px] font-semibold text-[var(--takeoff-ink)] transition-colors hover:bg-[var(--takeoff-paper)]"
-              >
-                <ChevronLeft className="h-4 w-4" />
-                Back
-              </button>
-              <button
-                onClick={handleContinue}
-                disabled={saveStatus === 'saving'}
-                className="takeoff-mono inline-flex items-center gap-2 rounded-full border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-4 py-2 text-[12px] font-semibold text-white transition-colors hover:bg-[#202621]"
-              >
-                Continue
-                <ArrowRight className="h-4 w-4" />
-              </button>
             </div>
           </div>
 
@@ -828,4 +822,4 @@ export function TakeoffSummary({
       </div>
     </div>
   );
-}
+});

@@ -1,13 +1,13 @@
 "use client";
 
-import { Fragment, use, useCallback, useEffect, useMemo, useState } from 'react';
+import { use, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 import { getActiveCompanyId } from '@/lib/supabase/company';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatCurrency } from '@/lib/calculations/pricing';
-import { AlertCircle, ArrowLeft, Download, Eye, FileText, Loader2, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ChevronDown, Download, Eye, FileText, Loader2, Plus, Trash2 } from 'lucide-react';
 import type { TakeoffEnvelopeV1 } from '@/lib/types/takeoff-envelope';
 import { resolveActiveMode } from '@/lib/extraction/resolveActiveMode';
 import {
@@ -79,6 +79,7 @@ interface InsulationArea {
   sqft: number;
   unit: EstimateUnit;
   pricePerSqft: number;
+  priceInput?: string;
   isCustom?: boolean;
   group: EstimateGroup;
   spec?: string | null;
@@ -89,14 +90,6 @@ interface GlobalPricing {
   attic_per_sqft: number;
   garage_wall_per_sqft: number;
   floor_per_sqft: number;
-}
-
-interface ProductDraft {
-  name: string;
-  group: EstimateGroup;
-  unit: EstimateUnit;
-  defaultPrice: string;
-  spec: string;
 }
 
 type EstimateSectionKey = 'walls' | 'ceilings' | 'floors' | 'specialty' | 'services' | 'custom';
@@ -185,8 +178,16 @@ const GROUP_BY_SECTION_KEY: Record<EstimateSectionKey, EstimateGroup> = {
   custom: 'Custom',
 };
 
-const ESTIMATE_GROUP_OPTIONS: EstimateGroup[] = ['Walls', 'Ceilings', 'Floors', 'Specialty', 'Services', 'Custom'];
 const ESTIMATE_UNIT_OPTIONS: EstimateUnit[] = ['SF', 'LF', 'EA'];
+const DECIMAL_INPUT_PATTERN = /^\d*\.?\d*$/;
+const QUOTE_GRID_COLUMNS = '48px minmax(270px,1.15fr) minmax(240px,1fr) 96px 68px 112px 116px 58px';
+
+function calculateTaxAmount(subtotal: number, taxRatePercent: number, isTaxExempt: boolean): number {
+  if (isTaxExempt) return 0;
+  const rate = Number.isFinite(taxRatePercent) ? taxRatePercent : 0;
+  const boundedRate = Math.max(0, Math.min(rate, 100));
+  return roundEstimateValue(subtotal * (boundedRate / 100));
+}
 
 function formatEditableNumber(value: number, precision: number = 2): string {
   const rounded = roundEstimateValue(value, precision);
@@ -198,12 +199,15 @@ function productMatchesGroup(product: QuoteProduct, group: EstimateGroup) {
 }
 
 function applyProductToArea(area: InsulationArea, product: QuoteProduct) {
+  const pricePerSqft = product.defaultPrice > 0 ? product.defaultPrice : area.pricePerSqft;
+
   return {
     ...area,
     productId: product.id,
     productType: product.name,
     unit: product.unit,
-    pricePerSqft: product.defaultPrice > 0 ? product.defaultPrice : area.pricePerSqft,
+    pricePerSqft,
+    priceInput: undefined,
     spec: product.spec ?? area.spec,
   };
 }
@@ -242,41 +246,59 @@ function withDefaultProduct(area: InsulationArea, products: QuoteProduct[]) {
   };
 }
 
-function buildProductDraft(area?: InsulationArea): ProductDraft {
-  return {
-    name: '',
-    group: area?.group ?? 'Walls',
-    unit: area?.unit ?? 'SF',
-    defaultPrice: area ? formatEditableNumber(area.pricePerSqft) : '',
-    spec: area?.spec ?? '',
-  };
+function normalizeRValueLabel(value: string | number): string | null {
+  const raw = String(value).trim();
+  const match = raw.match(/\bR\s*-?\s*(\d+(?:\.\d+)?)\b/i);
+  if (!match) return null;
+
+  const parsed = Number.parseFloat(match[1]);
+  const labelValue = Number.isFinite(parsed) && Number.isInteger(parsed) ? String(parsed) : match[1];
+  return `R-${labelValue}`;
+}
+
+function getAreaRValueLabel(area: InsulationArea): string | null {
+  if (area.rValue !== null && area.rValue > 0) {
+    return `R-${Number.isInteger(area.rValue) ? area.rValue : area.rValue}`;
+  }
+
+  for (const value of [area.spec, area.description, area.productType]) {
+    if (!value) continue;
+    const label = normalizeRValueLabel(value);
+    if (label) return label;
+  }
+
+  return null;
 }
 
 function formatLineDescriptor(area: InsulationArea): string | null {
   const parts: string[] = [];
-  if (area.productType && area.name && area.name.trim() !== area.productType.trim()) {
-    parts.push(area.name.trim());
+  const seen = new Set<string>();
+  const rValueLabel = getAreaRValueLabel(area);
+
+  if (rValueLabel) {
+    parts.push(rValueLabel);
+    seen.add(rValueLabel.toLowerCase());
   }
 
-  const spec = area.spec?.trim();
-  if (spec) {
-    parts.push(spec);
+  const blockedValues = [area.name, area.productType, area.spec]
+    .filter(Boolean)
+    .map((value) => value!.trim().toLowerCase());
+  const descriptionParts = area.description
+    ?.split('·')
+    .map((part) => part.trim())
+    .filter(Boolean) ?? [];
+
+  for (const part of descriptionParts) {
+    const normalized = part.toLowerCase();
+    if (normalized === 'custom line item' || normalized === 'service line item') continue;
+    if (blockedValues.includes(normalized)) continue;
+    if (normalizeRValueLabel(part)) continue;
+    if (seen.has(normalized)) continue;
+
+    parts.push(part);
+    seen.add(normalized);
   }
-  if (area.rValue !== null && area.rValue > 0) {
-    const rValue = `R-${area.rValue}`;
-    const rValuePattern = new RegExp(`\\bR\\s*-?\\s*${area.rValue}\\b`, 'i');
-    if (!parts.some((part) => rValuePattern.test(part))) {
-      parts.push(rValue);
-    }
-  }
-  const cleanedDescription = area.description?.trim();
-  if (
-    cleanedDescription &&
-    cleanedDescription.toLowerCase() !== 'custom line item' &&
-    !parts.includes(cleanedDescription)
-  ) {
-    parts.push(cleanedDescription);
-  }
+
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
@@ -363,12 +385,9 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
   const [error, setError] = useState<string | null>(null);
   const [insulationAreas, setInsulationAreas] = useState<InsulationArea[]>([]);
   const [productCatalog, setProductCatalog] = useState<QuoteProduct[]>(DEFAULT_QUOTE_PRODUCTS);
-  const [addingProductForAreaId, setAddingProductForAreaId] = useState<string | null>(null);
-  const [productDraft, setProductDraft] = useState<ProductDraft>(() => buildProductDraft());
-  const [isSavingProduct, setIsSavingProduct] = useState(false);
-  const [productError, setProductError] = useState<string | null>(null);
   const [reviewHref, setReviewHref] = useState(getProjectWorkspaceHref(projectRef));
-  const [taxAmount, setTaxAmount] = useState(0);
+  const [taxRatePercent, setTaxRatePercent] = useState(0);
+  const [isTaxExempt, setIsTaxExempt] = useState(false);
   const [terms, setTerms] = useState(
     'Final field measurements will be verified before installation. Pricing includes labor and standard insulation materials unless noted otherwise.'
   );
@@ -602,7 +621,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
 
       const { data: companyData } = await supabase
         .from('companies')
-        .select('quote_terms')
+        .select('quote_terms, default_tax_rate')
         .eq('id', companyId)
         .maybeSingle();
 
@@ -611,6 +630,8 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
       if (defaultQuoteTerms) {
         setTerms(defaultQuoteTerms);
       }
+      const defaultTaxRate = Number(companyData?.default_tax_rate ?? 0);
+      setTaxRatePercent(Number.isFinite(defaultTaxRate) ? defaultTaxRate : 0);
 
       const { data: roomsData } = await supabase
         .from('rooms')
@@ -778,79 +799,6 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
     );
   };
 
-  const startAddingProduct = (area: InsulationArea) => {
-    setProductDraft(buildProductDraft(area));
-    setProductError(null);
-    setAddingProductForAreaId(area.id);
-  };
-
-  const cancelAddingProduct = () => {
-    setAddingProductForAreaId(null);
-    setProductDraft(buildProductDraft());
-    setProductError(null);
-  };
-
-  const saveProduct = async (areaId: string) => {
-    const name = productDraft.name.trim();
-    const defaultPrice = roundEstimateValue(parseFloat(productDraft.defaultPrice) || 0);
-
-    if (!name) {
-      setProductError('Product name is required.');
-      return;
-    }
-
-    setIsSavingProduct(true);
-    setProductError(null);
-
-    try {
-      const response = await fetch('/api/quote/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          product: {
-            name,
-            group: productDraft.group,
-            unit: productDraft.unit,
-            defaultPrice,
-            spec: productDraft.spec,
-          },
-        }),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to save product.');
-      }
-
-      const products = normalizeQuoteProducts(data.products);
-      const draftSpec = productDraft.spec.trim().toLowerCase();
-      const savedProduct =
-        products.find((product) =>
-          product.name.toLowerCase() === name.toLowerCase() &&
-          (product.spec ?? '').toLowerCase() === draftSpec &&
-          product.unit === productDraft.unit
-        ) ??
-        data.product;
-      setProductCatalog(products);
-
-      if (savedProduct) {
-        setInsulationAreas((previous) =>
-          previous.map((area) =>
-            area.id === areaId
-              ? applyProductToArea(area, savedProduct)
-              : area
-          )
-        );
-      }
-
-      cancelAddingProduct();
-    } catch (saveError) {
-      setProductError(saveError instanceof Error ? saveError.message : 'Failed to save product.');
-    } finally {
-      setIsSavingProduct(false);
-    }
-  };
-
   const updateSqft = (areaId: string, value: string) => {
     const numericValue = roundEstimateValue(parseFloat(value) || 0);
     setInsulationAreas((previous) =>
@@ -865,10 +813,32 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
   };
 
   const updatePricePerSqft = (areaId: string, value: string) => {
-    const numericValue = roundEstimateValue(parseFloat(value) || 0);
+    const normalizedValue = value.replace(',', '.');
+    if (!DECIMAL_INPUT_PATTERN.test(normalizedValue)) return;
+
+    const numericValue = normalizedValue === '' || normalizedValue === '.'
+      ? 0
+      : roundEstimateValue(parseFloat(normalizedValue) || 0);
+
     setInsulationAreas((previous) =>
       previous.map((area) =>
-        area.id === areaId ? { ...area, pricePerSqft: numericValue } : area
+        area.id === areaId
+          ? { ...area, pricePerSqft: numericValue, priceInput: normalizedValue }
+          : area
+      )
+    );
+  };
+
+  const commitPricePerSqft = (areaId: string) => {
+    setInsulationAreas((previous) =>
+      previous.map((area) =>
+        area.id === areaId
+          ? {
+              ...area,
+              pricePerSqft: roundEstimateValue(area.pricePerSqft),
+              priceInput: undefined,
+            }
+          : area
       )
     );
   };
@@ -959,9 +929,13 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
   };
 
   const calculateTotals = () => {
-    const totals = calculateQuoteTotals(buildLineItems(), taxAmount);
+    const lineItems = buildLineItems();
+    const subtotalOnly = calculateQuoteTotals(lineItems, 0).subtotal;
+    const taxAmount = calculateTaxAmount(subtotalOnly, taxRatePercent, isTaxExempt);
+    const totals = calculateQuoteTotals(lineItems, taxAmount);
     return {
       subtotal: totals.subtotal,
+      taxAmount: totals.taxAmount,
       totalSqft: totals.totalSf,
       totalLf: totals.totalLf,
       totalEa: totals.totalEa,
@@ -980,14 +954,14 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
     return `${baseName || 'insulation-quote'}-quote.pdf`;
   };
 
-  const getQuotePreviewUrl = () => {
-    if (!quote?.pdf_url && !quote?.download_url) return null;
-    return quote.download_url || quote.pdf_url;
+  const getQuotePreviewUrl = (quoteRecord: QuoteRecord | null = quote) => {
+    if (!quoteRecord?.pdf_url && !quoteRecord?.download_url) return null;
+    return quoteRecord.download_url || quoteRecord.pdf_url;
   };
 
-  const getQuoteDownloadUrl = () => {
-    if (!quote?.pdf_url && !quote?.download_url) return null;
-    const sourceUrl = quote.pdf_url || quote.download_url;
+  const getQuoteDownloadUrl = (quoteRecord: QuoteRecord | null = quote) => {
+    if (!quoteRecord?.pdf_url && !quoteRecord?.download_url) return null;
+    const sourceUrl = quoteRecord.pdf_url || quoteRecord.download_url;
     if (!sourceUrl) return null;
 
     try {
@@ -1004,35 +978,16 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
     return sourceUrl;
   };
 
-  const previewQuotePdf = () => {
-    const previewUrl = getQuotePreviewUrl();
-    if (!previewUrl) return;
-    window.open(previewUrl, '_blank', 'noopener,noreferrer');
-  };
-
-  const downloadQuotePdf = () => {
-    const downloadUrl = getQuoteDownloadUrl();
-    if (!downloadUrl) return;
-
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = getQuoteFileName();
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  };
-
-  const handleGenerateQuote = async () => {
+  const generateQuotePdf = async () => {
     if (!project) {
       setError('Project not found');
-      return;
+      return null;
     }
 
     const errors = getValidationErrors();
     if (errors.length > 0) {
       setError(errors[0]);
-      return;
+      return null;
     }
 
     setIsGenerating(true);
@@ -1041,7 +996,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
     try {
       const lineItems = buildLineItems();
 
-      const { subtotal, total } = calculateTotals();
+      const { subtotal, taxAmount, total } = calculateTotals();
       const idempotencyKey = crypto.randomUUID();
 
       const response = await fetch('/api/quote/generate', {
@@ -1067,12 +1022,52 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
         throw new Error(data.error || 'Failed to generate quote');
       }
 
-      setQuote(data.quote);
+      const nextQuote = data.quote as QuoteRecord;
+      setQuote(nextQuote);
+      return nextQuote;
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : 'Failed to generate quote');
+      return null;
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const previewQuotePdf = async () => {
+    const previewWindow = window.open('about:blank', '_blank');
+    const nextQuote = await generateQuotePdf();
+    const previewUrl = getQuotePreviewUrl(nextQuote);
+
+    if (!previewUrl) {
+      previewWindow?.close();
+      return;
+    }
+
+    if (previewWindow) {
+      previewWindow.opener = null;
+      previewWindow.location.href = previewUrl;
+      return;
+    }
+
+    window.open(previewUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const downloadQuotePdf = async () => {
+    const nextQuote = await generateQuotePdf();
+    const downloadUrl = getQuoteDownloadUrl(nextQuote);
+    if (!downloadUrl) return;
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = getQuoteFileName();
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleGenerateQuote = async () => {
+    await generateQuotePdf();
   };
 
   const sectionGroups = useMemo(() => {
@@ -1095,7 +1090,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
   }
 
   const validationErrors = getValidationErrors();
-  const { subtotal, quantityLabel, total } = calculateTotals();
+  const { subtotal, taxAmount, quantityLabel, total } = calculateTotals();
   const enabledAreas = getEnabledAreas();
   let rowNumber = 1;
 
@@ -1201,15 +1196,18 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
               );
 
               return (
-                <section key={section.key} className="overflow-hidden rounded-[20px] border border-[var(--takeoff-line)]">
-                  <div className="flex items-center justify-between border-b border-[rgba(20,24,20,0.16)] bg-[var(--takeoff-ink)] px-5 py-2 text-white">
+                <section key={section.key} className="overflow-visible rounded-[20px] border border-[var(--takeoff-line)] bg-white">
+                  <div className="flex items-center justify-between rounded-t-[19px] border-b border-[rgba(20,24,20,0.16)] bg-[var(--takeoff-ink)] px-5 py-2 text-white">
                     <p className="takeoff-mono text-[11px] uppercase tracking-[0.24em]">
                       {section.code} - {section.title}
                     </p>
                     <p className="text-sm font-semibold">{formatCurrency(sectionSubtotal)}</p>
                   </div>
 
-                  <div className="grid grid-cols-[56px,minmax(190px,0.85fr),minmax(220px,1fr),96px,76px,118px,130px,70px,40px] gap-0 border-b border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] text-[11px] uppercase tracking-[0.18em] text-[var(--takeoff-text-subtle)]">
+                  <div
+                    className="grid gap-0 border-b border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] text-[11px] uppercase tracking-[0.18em] text-[var(--takeoff-text-subtle)]"
+                    style={{ gridTemplateColumns: QUOTE_GRID_COLUMNS }}
+                  >
                     <span className="px-4 py-3">Item</span>
                     <span className="border-l border-[var(--takeoff-line)] px-4 py-3">Product / Service</span>
                     <span className="border-l border-[var(--takeoff-line)] px-4 py-3">Scope / Spec</span>
@@ -1218,32 +1216,12 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                     <span className="border-l border-[var(--takeoff-line)] px-4 py-3 text-right">Unit price</span>
                     <span className="border-l border-[var(--takeoff-line)] px-4 py-3 text-right">Amount</span>
                     <span className="border-l border-[var(--takeoff-line)] px-4 py-3 text-right">Use</span>
-                    <span className="border-l border-[var(--takeoff-line)] px-4 py-3" />
                   </div>
 
                   <div className="bg-white">
                     {section.items.length === 0 ? (
                       <div className="flex items-center justify-between px-5 py-5 text-sm text-[var(--takeoff-text-muted)]">
                         <span>No rows in this section yet.</span>
-                        {section.key === 'services' ? (
-                          <Button
-                            variant="outline"
-                            onClick={addServiceLineItem}
-                            className="ev-secondary-action"
-                          >
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add Service
-                          </Button>
-                        ) : section.key === 'custom' ? (
-                          <Button
-                            variant="outline"
-                            onClick={addCustomLineItem}
-                            className="ev-secondary-action"
-                          >
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add Row
-                          </Button>
-                        ) : null}
                       </div>
                       ) : (
                         section.items.map((area) => {
@@ -1253,39 +1231,70 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                           const productOptions = productCatalog.filter((product) =>
                             productMatchesGroup(product, area.group)
                           );
+                          const selectedProduct = productCatalog.find((product) => product.id === area.productId) ?? null;
 
                           return (
-                            <Fragment key={area.id}>
-                              <div
-                                className={`grid grid-cols-[56px,minmax(190px,0.85fr),minmax(220px,1fr),96px,76px,118px,130px,70px,40px] gap-0 border-b border-[var(--takeoff-line)] ${
-                                  area.enabled ? 'bg-white' : 'bg-[var(--takeoff-paper)] text-[var(--takeoff-text-subtle)]'
-                                }`}
-                              >
+                            <div
+                              key={area.id}
+                              className={`grid gap-0 border-b border-[var(--takeoff-line)] ${
+                                area.enabled ? 'bg-white' : 'bg-[var(--takeoff-paper)] text-[var(--takeoff-text-subtle)]'
+                              }`}
+                              style={{ gridTemplateColumns: QUOTE_GRID_COLUMNS }}
+                            >
                                 <div className="px-4 py-4 text-sm font-medium text-[var(--takeoff-text-muted)]">
                                   {currentRowNumber}
                                 </div>
 
                                 <div className="border-l border-[var(--takeoff-line)] px-3 py-3">
-                                  <select
-                                    value={area.productId ?? ''}
-                                    onChange={(event) => updateProduct(area.id, event.target.value)}
-                                    className="h-10 w-full rounded-[12px] border border-[var(--takeoff-line)] bg-white px-3 text-sm font-medium text-[var(--takeoff-ink)] outline-none"
-                                  >
-                                    <option value="">Select product</option>
-                                    {productOptions.map((product) => (
-                                      <option key={product.id} value={product.id}>
-                                        {product.name}{product.spec ? ` - ${product.spec}` : ''}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <button
-                                    type="button"
-                                    onClick={() => startAddingProduct(area)}
-                                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[var(--takeoff-ink)] hover:text-[var(--takeoff-accent)]"
-                                  >
-                                    <Plus className="h-3 w-3" />
-                                    Add product
-                                  </button>
+                                  <details className="group relative">
+                                    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-[12px] border border-[var(--takeoff-line)] bg-white px-3 py-2 text-sm font-medium text-[var(--takeoff-ink)] outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--takeoff-ink)] [&::-webkit-details-marker]:hidden">
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block whitespace-normal break-words leading-snug">
+                                          {selectedProduct?.name || area.productType || 'Select product'}
+                                        </span>
+                                        {selectedProduct?.spec ? (
+                                          <span className="mt-1 block whitespace-normal break-words text-xs font-normal leading-snug text-[var(--takeoff-text-muted)]">
+                                            {selectedProduct.spec}
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                      <ChevronDown className="h-4 w-4 shrink-0 text-[var(--takeoff-text-muted)] transition group-open:rotate-180" />
+                                    </summary>
+                                    <div className="absolute left-0 z-30 mt-2 max-h-72 w-[min(520px,calc(100vw-2rem))] overflow-y-auto rounded-[14px] border border-[var(--takeoff-line)] bg-white p-1 shadow-[0_18px_40px_rgba(31,39,33,0.18)]">
+                                      {productOptions.map((product) => (
+                                        <button
+                                          key={product.id}
+                                          type="button"
+                                          onClick={(event) => {
+                                            updateProduct(area.id, product.id);
+                                            event.currentTarget.closest('details')?.removeAttribute('open');
+                                          }}
+                                          className={`block w-full rounded-[10px] px-3 py-2 text-left text-sm leading-snug transition hover:bg-[var(--takeoff-paper)] ${
+                                            product.id === area.productId ? 'bg-[var(--takeoff-paper)] font-semibold text-[var(--takeoff-ink)]' : 'text-[var(--takeoff-text-muted)]'
+                                          }`}
+                                        >
+                                          <span className="block whitespace-normal break-words">{product.name}</span>
+                                          {product.spec ? (
+                                            <span className="mt-0.5 block whitespace-normal break-words text-xs font-normal text-[var(--takeoff-text-muted)]">
+                                              {product.spec}
+                                            </span>
+                                          ) : null}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </details>
+                                  {area.isCustom ? (
+                                    <div className="mt-2 flex items-center gap-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => removeCustomLineItem(area.id)}
+                                        className="inline-flex items-center gap-1 text-xs font-medium text-[var(--takeoff-text-muted)] hover:text-[var(--takeoff-accent)]"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                        Remove
+                                      </button>
+                                    </div>
+                                  ) : null}
                                 </div>
 
                                 <div className="border-l border-[var(--takeoff-line)] px-4 py-3">
@@ -1323,8 +1332,9 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
 
                                 <div className="border-l border-[var(--takeoff-line)] px-3 py-3">
                                   <Input
-                                    value={formatEditableNumber(area.pricePerSqft)}
+                                    value={area.priceInput ?? formatEditableNumber(area.pricePerSqft)}
                                     onChange={(event) => updatePricePerSqft(area.id, event.target.value)}
+                                    onBlur={() => commitPricePerSqft(area.id)}
                                     inputMode="decimal"
                                     className="h-10 border-0 bg-transparent px-0 text-right text-sm shadow-none focus-visible:ring-0"
                                   />
@@ -1344,89 +1354,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                                     />
                                   </label>
                                 </div>
-
-                                <div className="flex items-center justify-center border-l border-[var(--takeoff-line)] px-1 py-3">
-                                  {area.isCustom ? (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => removeCustomLineItem(area.id)}
-                                      className="h-8 w-8 text-[var(--takeoff-text-muted)] hover:bg-[var(--takeoff-paper)] hover:text-[var(--takeoff-ink)]"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              </div>
-
-                              {addingProductForAreaId === area.id ? (
-                                <div className="grid grid-cols-[56px,minmax(190px,0.85fr),minmax(220px,1fr),96px,76px,118px,130px,70px,40px] gap-0 border-b border-[var(--takeoff-line)] bg-[var(--takeoff-paper)]">
-                                  <div />
-                                  <div className="col-span-8 border-l border-[var(--takeoff-line)] px-4 py-4">
-                                    <div className="grid gap-3 lg:grid-cols-[minmax(190px,1.2fr),minmax(170px,1fr),120px,90px,120px,auto]">
-                                      <Input
-                                        value={productDraft.name}
-                                        onChange={(event) => setProductDraft((draft) => ({ ...draft, name: event.target.value }))}
-                                        placeholder="Product or service name"
-                                        className="h-10 rounded-[12px] bg-white text-sm"
-                                      />
-                                      <Input
-                                        value={productDraft.spec}
-                                        onChange={(event) => setProductDraft((draft) => ({ ...draft, spec: event.target.value }))}
-                                        placeholder="Spec, assembly, or note"
-                                        className="h-10 rounded-[12px] bg-white text-sm"
-                                      />
-                                      <select
-                                        value={productDraft.group}
-                                        onChange={(event) => setProductDraft((draft) => ({ ...draft, group: event.target.value as EstimateGroup }))}
-                                        className="h-10 rounded-[12px] border border-[var(--takeoff-line)] bg-white px-3 text-sm text-[var(--takeoff-ink)] outline-none"
-                                      >
-                                        {ESTIMATE_GROUP_OPTIONS.map((group) => (
-                                          <option key={group} value={group}>{group}</option>
-                                        ))}
-                                      </select>
-                                      <select
-                                        value={productDraft.unit}
-                                        onChange={(event) => setProductDraft((draft) => ({ ...draft, unit: event.target.value as EstimateUnit }))}
-                                        className="h-10 rounded-[12px] border border-[var(--takeoff-line)] bg-white px-3 text-sm text-[var(--takeoff-ink)] outline-none"
-                                      >
-                                        {ESTIMATE_UNIT_OPTIONS.map((unit) => (
-                                          <option key={unit} value={unit}>{unit}</option>
-                                        ))}
-                                      </select>
-                                      <Input
-                                        value={productDraft.defaultPrice}
-                                        onChange={(event) => setProductDraft((draft) => ({ ...draft, defaultPrice: event.target.value }))}
-                                        inputMode="decimal"
-                                        placeholder="Default price"
-                                        className="h-10 rounded-[12px] bg-white text-sm"
-                                      />
-                                      <div className="flex items-center gap-2">
-                                        <Button
-                                          type="button"
-                                          onClick={() => saveProduct(area.id)}
-                                          disabled={isSavingProduct}
-                                          className="h-10 px-4"
-                                        >
-                                          {isSavingProduct ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          onClick={cancelAddingProduct}
-                                          className="h-10 px-3"
-                                        >
-                                          Cancel
-                                        </Button>
-                                      </div>
-                                    </div>
-                                    {productError ? (
-                                      <p className="mt-2 text-xs text-[var(--takeoff-accent)]">{productError}</p>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </Fragment>
+                            </div>
                           );
                         })
                       )}
@@ -1491,19 +1419,31 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                   </div>
 
                   <div className="rounded-[16px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="ev-label">
-                        Tax
-                      </span>
-                      <Input
-                        value={formatEditableNumber(taxAmount)}
-                        onChange={(event) =>
-                          setTaxAmount(roundEstimateValue(parseFloat(event.target.value) || 0))
-                        }
-                        inputMode="decimal"
-                        className="h-10 border-0 bg-transparent px-0 text-right text-sm shadow-none focus-visible:ring-0"
-                      />
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <span className="ev-label">
+                          Tax
+                        </span>
+                        <p className="mt-1 text-xs text-[var(--takeoff-text-muted)]">
+                          {isTaxExempt ? 'Tax exempt' : `${formatEditableNumber(taxRatePercent, 4)}% from settings`}
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold">{formatCurrency(taxAmount)}</span>
                     </div>
+                    <label className="mt-3 flex items-start gap-3 rounded-[12px] border border-[var(--takeoff-line)] bg-white px-3 py-2 text-sm text-[var(--takeoff-ink)]">
+                      <input
+                        type="checkbox"
+                        checked={isTaxExempt}
+                        onChange={(event) => setIsTaxExempt(event.target.checked)}
+                        className="mt-1 h-4 w-4 accent-[var(--takeoff-ink)]"
+                      />
+                      <span>
+                        <span className="block font-medium">Tax exempt</span>
+                        <span className="block text-xs text-[var(--takeoff-text-muted)]">
+                          Remove the default tax from this quote.
+                        </span>
+                      </span>
+                    </label>
                   </div>
 
                   <div className="rounded-[16px] border border-[rgba(20,24,20,0.16)] bg-[#edf5e8] px-4 py-4">
@@ -1522,6 +1462,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                       variant="outline"
                       className="ev-secondary-action w-full"
                       onClick={previewQuotePdf}
+                      disabled={isGenerating || validationErrors.length > 0}
                     >
                       <Eye className="mr-2 h-4 w-4" />
                       Preview PDF
@@ -1530,6 +1471,7 @@ export default function QuotePage({ params }: { params: Promise<{ id: string }> 
                       type="button"
                       className="ev-primary-action w-full"
                       onClick={downloadQuotePdf}
+                      disabled={isGenerating || validationErrors.length > 0}
                     >
                       <Download className="mr-2 h-4 w-4" />
                       Download PDF

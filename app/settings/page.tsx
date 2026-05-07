@@ -34,6 +34,7 @@ interface CompanyProfile {
   website: string;
   licenseNumber: string;
   quoteTerms: string;
+  defaultTaxRate: string;
   logoUrl: string | null;
 }
 
@@ -55,6 +56,7 @@ interface TeamInvitation {
 }
 
 const COMPANY_PROFILE_UPDATED_EVENT = 'company-profile-updated';
+const TAX_RATE_INPUT_PATTERN = /^\d*\.?\d{0,4}$/;
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({
@@ -93,6 +95,7 @@ export default function SettingsPage() {
     website: '',
     licenseNumber: '',
     quoteTerms: '',
+    defaultTaxRate: '',
     logoUrl: null,
   });
 
@@ -139,11 +142,12 @@ export default function SettingsPage() {
 
       const { data: companyData } = await supabase
         .from('companies')
-        .select('name, legal_name, email, phone, address, website, license_number, quote_terms, logo_url')
+        .select('name, legal_name, email, phone, address, website, license_number, quote_terms, default_tax_rate, logo_url')
         .eq('id', membership.companyId)
         .maybeSingle();
 
       if (companyData) {
+        const defaultTaxRate = Number(companyData.default_tax_rate ?? 0);
         setCompany({
           name: companyData.name ?? '',
           legalName: companyData.legal_name ?? '',
@@ -153,6 +157,7 @@ export default function SettingsPage() {
           website: companyData.website ?? '',
           licenseNumber: companyData.license_number ?? '',
           quoteTerms: companyData.quote_terms ?? '',
+          defaultTaxRate: Number.isFinite(defaultTaxRate) ? String(defaultTaxRate) : '',
           logoUrl: companyData.logo_url ?? null,
         });
       }
@@ -190,6 +195,7 @@ export default function SettingsPage() {
     formData.set('website', company.website.trim());
     formData.set('licenseNumber', company.licenseNumber.trim());
     formData.set('quoteTerms', company.quoteTerms.trim());
+    formData.set('defaultTaxRate', company.defaultTaxRate.trim());
     if (companyLogo) formData.set('logo', companyLogo);
 
     const response = await fetch('/api/company/bootstrap', {
@@ -516,6 +522,30 @@ export default function SettingsPage() {
                     value={company.quoteTerms}
                     onChange={(event) => setCompany({ ...company, quoteTerms: event.target.value })}
                   />
+                </div>
+
+                <div>
+                  <Label htmlFor="company-default-tax-rate">Default Tax Rate (%)</Label>
+                  <Input
+                    id="company-default-tax-rate"
+                    type="text"
+                    inputMode="decimal"
+                    value={company.defaultTaxRate}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(',', '.');
+                      if (!TAX_RATE_INPUT_PATTERN.test(value)) return;
+                      const numericValue = value === '' || value === '.' ? 0 : Number.parseFloat(value);
+                      if (Number.isFinite(numericValue) && numericValue > 100) return;
+                      setCompany({
+                        ...company,
+                        defaultTaxRate: value,
+                      });
+                    }}
+                    placeholder="e.g., 8.6"
+                  />
+                  <p className="ev-muted mt-1 text-xs">
+                    Used by default on quote totals. Mark a quote tax exempt when sales tax should be removed.
+                  </p>
                 </div>
 
                 <div className="rounded-[20px] border border-dashed border-[var(--takeoff-line-strong)] bg-white px-4 py-4">
