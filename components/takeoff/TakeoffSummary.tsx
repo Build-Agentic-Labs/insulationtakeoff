@@ -42,14 +42,15 @@ interface EstimateDeductionRow {
 
 type VisionZoneKey = 'exterior' | 'interior' | 'attic' | 'crawlspace';
 
-const GROUP_ORDER: EstimateGroup[] = ['Walls', 'Floors', 'Ceilings', 'Specialty', 'Custom'];
+const GROUP_ORDER: EstimateGroup[] = ['Walls', 'Floors', 'Ceilings', 'Specialty', 'Services', 'Custom'];
 
 const GROUP_CODES: Record<EstimateGroup, string> = {
   Walls: '01',
   Floors: '02',
   Ceilings: '03',
   Specialty: '04',
-  Custom: '05',
+  Services: '05',
+  Custom: '06',
 };
 
 const STORAGE_PREFIX = 'takeoff-estimate-review:';

@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     const { data: company, error: companyError } = await supabaseAdmin
       .from('companies')
-      .select('name, legal_name, logo_url, address, phone, email, website, license_number, quote_terms, quote_footer')
+      .select('name, legal_name, logo_url, address, phone, email, website, license_number, quote_terms')
       .eq('id', companyId)
       .single();
 
@@ -129,7 +129,6 @@ export async function POST(request: NextRequest) {
       companyWebsite: company.website ?? undefined,
       companyLicenseNumber: company.license_number ?? undefined,
       companyLogoUrl,
-      footerText: company.quote_footer ?? undefined,
     });
 
     const pdfBuffer = await renderToBuffer(pdfDoc);

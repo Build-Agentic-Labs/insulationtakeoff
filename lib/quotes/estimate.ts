@@ -1,4 +1,4 @@
-export type EstimateGroup = 'Walls' | 'Floors' | 'Ceilings' | 'Specialty' | 'Custom';
+export type EstimateGroup = 'Walls' | 'Floors' | 'Ceilings' | 'Specialty' | 'Services' | 'Custom';
 export type EstimateUnit = 'SF' | 'LF' | 'EA';
 export type EstimateSource = 'takeoff' | 'manual';
 
@@ -17,6 +17,8 @@ export interface EstimateWorksheetRow {
 export interface QuoteLineItem {
   id: string;
   area: string;
+  productId?: string | null;
+  productType?: string | null;
   quantity: number;
   unit: EstimateUnit;
   sqft: number;
@@ -40,7 +42,7 @@ export interface QuoteTotals {
   quantityLabel: string;
 }
 
-const ESTIMATE_GROUPS: EstimateGroup[] = ['Walls', 'Floors', 'Ceilings', 'Specialty', 'Custom'];
+const ESTIMATE_GROUPS: EstimateGroup[] = ['Walls', 'Floors', 'Ceilings', 'Specialty', 'Services', 'Custom'];
 const ESTIMATE_UNITS: EstimateUnit[] = ['SF', 'LF', 'EA'];
 
 export const ESTIMATE_GROUP_SECTION_TITLE: Record<EstimateGroup, string> = {
@@ -48,6 +50,7 @@ export const ESTIMATE_GROUP_SECTION_TITLE: Record<EstimateGroup, string> = {
   Floors: 'Floors & Crawlspaces',
   Ceilings: 'Ceilings & Attics',
   Specialty: 'Specialty Scope',
+  Services: 'Services & Tests',
   Custom: 'Manual Additions',
 };
 
@@ -190,6 +193,8 @@ export function normalizeQuoteLineItems(value: unknown): QuoteLineItem[] {
       return {
         id: readString(record.id) || `line:${index}`,
         area,
+        productId: readString(record.productId) || null,
+        productType: readString(record.productType) || null,
         quantity: roundEstimateValue(quantity, 1),
         unit,
         sqft: roundEstimateValue(quantity, 1),

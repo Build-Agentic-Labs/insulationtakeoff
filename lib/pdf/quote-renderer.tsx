@@ -31,9 +31,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   logo: {
-    width: 48,
-    height: 48,
-    borderRadius: 6,
+    width: 96,
+    height: 72,
+    objectFit: 'contain',
+    borderRadius: 4,
   },
   companyName: {
     fontSize: 18,
@@ -231,18 +232,6 @@ const styles = StyleSheet.create({
     lineHeight: 1.5,
     color: '#4b5563',
   },
-  footer: {
-    position: 'absolute',
-    bottom: 14,
-    left: 30,
-    right: 30,
-    textAlign: 'center',
-    fontSize: 8,
-    color: '#9ca3af',
-    borderTopWidth: 1,
-    borderTopColor: '#ece4d2',
-    paddingTop: 8,
-  },
 });
 
 interface QuotePDFProps {
@@ -262,7 +251,6 @@ interface QuotePDFProps {
   companyWebsite?: string;
   companyLicenseNumber?: string;
   companyLogoUrl?: string | null;
-  footerText?: string;
 }
 
 export function QuotePDF({
@@ -282,7 +270,6 @@ export function QuotePDF({
   companyWebsite,
   companyLicenseNumber,
   companyLogoUrl,
-  footerText,
 }: QuotePDFProps) {
   const contactDetails = [companyPhone, companyEmail, companyWebsite].filter(Boolean).join(' · ');
   const licenseDetails = companyLicenseNumber ? `License ${companyLicenseNumber}` : null;
@@ -409,11 +396,6 @@ export function QuotePDF({
               'Final field measurements will be verified before installation. Pricing includes labor and standard insulation materials unless noted otherwise.'}
           </Text>
         </View>
-
-        <Text style={styles.footer}>
-          {footerText?.trim() ||
-            'Estimate quantities originate from the takeoff workspace and should be field-verified before installation.'}
-        </Text>
       </Page>
     </Document>
   );
