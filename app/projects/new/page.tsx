@@ -521,7 +521,7 @@ function NewProjectContent() {
                         ) : (
                           <>
                             <PenLine className="mr-2 h-4 w-4" />
-                            Create & Build Manually
+                            Create Project
                           </>
                         )}
                       </Button>
@@ -546,8 +546,8 @@ function NewProjectContent() {
                 steps={[
                   "Optionally select or create a client to associate with this project",
                   "Enter a project name (e.g., the lot number or address)",
-                  "Upload a PDF floor plan or image to keep it attached to the client profile",
-                  "Or skip the file to enter measurements manually",
+                  "Upload a PDF floor plan or image now, if you have one",
+                  "Create the project. You can add plans or measurements later.",
                 ]}
                 tip="For best results, upload architectural floor plans with room dimensions labeled."
               />

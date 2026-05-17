@@ -67,10 +67,6 @@ function validateImageFile(file: File) {
   return null;
 }
 
-async function waitForVideoFrame(video: HTMLVideoElement) {
-  await new Promise((resolve) => window.requestAnimationFrame(resolve));
-}
-
 async function canvasToPngBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((result) => {
@@ -163,7 +159,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
     addFiles(files);
   };
 
-  const captureScreen = async () => {
+  const capturePageSurface = async () => {
     setError(null);
 
     if (attachments.length >= MAX_ATTACHMENTS) {
@@ -171,57 +167,37 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
       return;
     }
 
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      setError('Screen capture is not available in this browser.');
-      return;
-    }
-
     setIsCapturing(true);
     setOpen(false);
-    let stream: MediaStream | null = null;
 
     try {
-      await new Promise((resolve) => window.setTimeout(resolve, 150));
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      const { default: html2canvas } = await import('html2canvas');
+      const canvas = await html2canvas(document.body, {
+        backgroundColor: null,
+        height: window.innerHeight,
+        ignoreElements: (element) => element.closest('[data-support-capture-exclude]') !== null,
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+        scrollX: -window.scrollX,
+        scrollY: -window.scrollY,
+        useCORS: true,
+        width: window.innerWidth,
+        windowHeight: document.documentElement.scrollHeight,
+        windowWidth: document.documentElement.scrollWidth,
+        x: window.scrollX,
+        y: window.scrollY,
       });
 
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
-      await video.play();
-      await waitForVideoFrame(video);
-
-      const width = video.videoWidth || window.innerWidth;
-      const height = video.videoHeight || window.innerHeight;
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-
-      const context = canvas.getContext('2d');
-      if (!context) {
-        throw new Error('Unable to capture screen image.');
-      }
-
-      context.drawImage(video, 0, 0, width, height);
       setSnipImage({
         dataUrl: canvas.toDataURL('image/png'),
-        width,
-        height,
+        width: canvas.width,
+        height: canvas.height,
       });
       setSnipSelection(null);
     } catch (captureError) {
-      const message = captureError instanceof DOMException && captureError.name === 'NotAllowedError'
-        ? 'Screen capture was cancelled or blocked.'
-        : captureError instanceof Error
-          ? captureError.message
-          : 'Screen capture failed.';
-      setError(message);
+      setError(captureError instanceof Error ? captureError.message : 'Page capture failed.');
       setOpen(true);
     } finally {
-      stream?.getTracks().forEach((track) => track.stop());
       setIsCapturing(false);
     }
   };
@@ -415,6 +391,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
         </button>
       </DialogTrigger>
       <DialogContent
+        data-support-capture-exclude
         className="max-h-[90vh] overflow-y-auto rounded-[18px] border-[var(--takeoff-line)] bg-[var(--takeoff-paper-strong)] p-0 text-[var(--takeoff-ink)] sm:max-w-2xl"
         onPaste={handlePaste}
       >
@@ -482,7 +459,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
                 <div>
                   <div className="ev-label">Screenshots</div>
                   <div className="mt-1 text-sm text-[var(--takeoff-text-muted)]">
-                    Capture the screen, snip a region, upload images, or paste from clipboard.
+                    Capture the current page, snip a region, upload images, or paste from clipboard.
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -490,7 +467,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={captureScreen}
+                    onClick={capturePageSurface}
                     disabled={isCapturing || isSubmitting || attachments.length >= MAX_ATTACHMENTS}
                   >
                     {isCapturing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
@@ -565,13 +542,13 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
     </Dialog>
 
       {snipImage ? (
-        <div className="fixed inset-0 z-[80] bg-[rgba(10,15,12,0.88)] p-4 text-[var(--takeoff-ink)]">
+        <div data-support-capture-exclude className="fixed inset-0 z-[80] bg-[rgba(10,15,12,0.88)] p-4 text-[var(--takeoff-ink)]">
           <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-[18px] border border-[rgba(216,222,212,0.18)] bg-[var(--takeoff-paper-strong)] shadow-2xl">
             <div className="flex flex-col gap-3 border-b border-[var(--takeoff-line)] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <div className="ev-label">Screen snip</div>
                 <div className="mt-1 text-lg font-semibold tracking-[-0.03em] text-[var(--takeoff-ink)]">
-                  Drag over the issue, or attach the full screen.
+                  Drag over the issue, or attach the visible page.
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -579,7 +556,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
                   Cancel
                 </Button>
                 <Button type="button" variant="outline" onClick={() => attachSnip('full')}>
-                  Use full screen
+                  Use visible page
                 </Button>
                 <Button
                   type="button"
