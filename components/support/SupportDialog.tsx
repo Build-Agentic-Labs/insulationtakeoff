@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, type ClipboardEvent, type FormEvent, type PointerEvent, useEffect, useRef, useState } from 'react';
+import { type ChangeEvent, type ClipboardEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Camera, ImagePlus, Loader2, Paperclip, Send, X } from 'lucide-react';
@@ -31,19 +31,6 @@ interface SupportAttachment {
   previewUrl: string;
 }
 
-interface SnipImage {
-  dataUrl: string;
-  width: number;
-  height: number;
-}
-
-interface SnipSelection {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 function getProjectId(pathname: string) {
   const match = pathname.match(/^\/projects\/([^/]+)/);
   return match?.[1] ?? null;
@@ -67,37 +54,15 @@ function validateImageFile(file: File) {
   return null;
 }
 
-async function canvasToPngBlob(canvas: HTMLCanvasElement) {
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((result) => {
-      if (result) resolve(result);
-      else reject(new Error('Unable to save captured screenshot.'));
-    }, 'image/png');
-  });
-}
-
-function normalizeSelection(startX: number, startY: number, endX: number, endY: number): SnipSelection {
-  return {
-    x: Math.min(startX, endX),
-    y: Math.min(startY, endY),
-    width: Math.abs(endX - startX),
-    height: Math.abs(endY - startY),
-  };
-}
-
 export function SupportDialog({ collapsed = false }: SupportDialogProps) {
   const pathname = usePathname();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const snipImageRef = useRef<HTMLImageElement | null>(null);
-  const snipStartRef = useRef<{ x: number; y: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<SupportAttachment[]>([]);
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [snipImage, setSnipImage] = useState<SnipImage | null>(null);
-  const [snipSelection, setSnipSelection] = useState<SnipSelection | null>(null);
-  const [isDraggingSnip, setIsDraggingSnip] = useState(false);
+  const [showScreenshotHelp, setShowScreenshotHelp] = useState(false);
+  const [isReadingClipboard, setIsReadingClipboard] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -159,7 +124,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
     addFiles(files);
   };
 
-  const capturePageSurface = async () => {
+  const readClipboardScreenshots = async () => {
     setError(null);
 
     if (attachments.length >= MAX_ATTACHMENTS) {
@@ -167,131 +132,37 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
       return;
     }
 
-    setIsCapturing(true);
-    setOpen(false);
-
-    try {
-      await new Promise((resolve) => window.setTimeout(resolve, 180));
-      const { default: html2canvas } = await import('html2canvas');
-      const canvas = await html2canvas(document.body, {
-        backgroundColor: null,
-        height: window.innerHeight,
-        ignoreElements: (element) => element.closest('[data-support-capture-exclude]') !== null,
-        scale: Math.min(window.devicePixelRatio || 1, 2),
-        scrollX: -window.scrollX,
-        scrollY: -window.scrollY,
-        useCORS: true,
-        width: window.innerWidth,
-        windowHeight: document.documentElement.scrollHeight,
-        windowWidth: document.documentElement.scrollWidth,
-        x: window.scrollX,
-        y: window.scrollY,
-      });
-
-      setSnipImage({
-        dataUrl: canvas.toDataURL('image/png'),
-        width: canvas.width,
-        height: canvas.height,
-      });
-      setSnipSelection(null);
-    } catch (captureError) {
-      setError(captureError instanceof Error ? captureError.message : 'Page capture failed.');
-      setOpen(true);
-    } finally {
-      setIsCapturing(false);
+    if (!navigator.clipboard?.read) {
+      setError('Clipboard image access is not available in this browser. Take a screenshot, then paste it here or upload the file.');
+      return;
     }
-  };
 
-  const getSnipPoint = (event: PointerEvent<HTMLImageElement>) => {
-    const image = snipImageRef.current;
-    if (!image || !snipImage) return null;
-
-    const rect = image.getBoundingClientRect();
-    const x = Math.max(0, Math.min(snipImage.width, ((event.clientX - rect.left) / rect.width) * snipImage.width));
-    const y = Math.max(0, Math.min(snipImage.height, ((event.clientY - rect.top) / rect.height) * snipImage.height));
-    return { x, y };
-  };
-
-  const handleSnipPointerDown = (event: PointerEvent<HTMLImageElement>) => {
-    const point = getSnipPoint(event);
-    if (!point) return;
-
-    event.currentTarget.setPointerCapture(event.pointerId);
-    snipStartRef.current = point;
-    setIsDraggingSnip(true);
-    setSnipSelection({ x: point.x, y: point.y, width: 0, height: 0 });
-  };
-
-  const handleSnipPointerMove = (event: PointerEvent<HTMLImageElement>) => {
-    if (!isDraggingSnip || !snipStartRef.current) return;
-    const point = getSnipPoint(event);
-    if (!point) return;
-
-    setSnipSelection(normalizeSelection(snipStartRef.current.x, snipStartRef.current.y, point.x, point.y));
-  };
-
-  const handleSnipPointerUp = (event: PointerEvent<HTMLImageElement>) => {
-    if (!isDraggingSnip) return;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    setIsDraggingSnip(false);
-    snipStartRef.current = null;
-  };
-
-  const cancelSnip = () => {
-    setSnipImage(null);
-    setSnipSelection(null);
-    snipStartRef.current = null;
-    setIsDraggingSnip(false);
-    setOpen(true);
-  };
-
-  const attachSnip = async (mode: 'full' | 'selection') => {
-    if (!snipImage) return;
-    setError(null);
-
+    setIsReadingClipboard(true);
     try {
-      const sourceImage = new Image();
-      sourceImage.src = snipImage.dataUrl;
-      await sourceImage.decode();
+      const clipboardItems = await navigator.clipboard.read();
+      const files: File[] = [];
 
-      const selection = mode === 'selection' && snipSelection && snipSelection.width >= 8 && snipSelection.height >= 8
-        ? snipSelection
-        : { x: 0, y: 0, width: snipImage.width, height: snipImage.height };
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(selection.width);
-      canvas.height = Math.round(selection.height);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      for (const item of clipboardItems) {
+        const imageType = item.types.find((type) => SUPPORT_IMAGE_TYPES.includes(type));
+        if (!imageType) continue;
 
-      const context = canvas.getContext('2d');
-      if (!context) {
-        throw new Error('Unable to prepare selected screenshot.');
+        const blob = await item.getType(imageType);
+        const extension = imageType === 'image/jpeg' ? 'jpg' : imageType.replace('image/', '');
+        files.push(new File([blob], `screenshot-${timestamp}.${extension}`, { type: imageType }));
       }
 
-      context.drawImage(
-        sourceImage,
-        selection.x,
-        selection.y,
-        selection.width,
-        selection.height,
-        0,
-        0,
-        canvas.width,
-        canvas.height
-      );
+      if (files.length === 0) {
+        setError('No screenshot image was found on the clipboard.');
+        return;
+      }
 
-      const blob = await canvasToPngBlob(canvas);
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      addFiles([
-        new File([blob], mode === 'selection' ? `screen-snip-${timestamp}.png` : `screen-capture-${timestamp}.png`, {
-          type: 'image/png',
-        }),
-      ]);
-
-      setSnipImage(null);
-      setSnipSelection(null);
-      setOpen(true);
-    } catch (snipError) {
-      setError(snipError instanceof Error ? snipError.message : 'Unable to attach screenshot.');
-      setOpen(true);
+      addFiles(files);
+      setShowScreenshotHelp(false);
+    } catch {
+      setError('Could not read the clipboard. Take a screenshot, then press Cmd+V or Ctrl+V in this window.');
+    } finally {
+      setIsReadingClipboard(false);
     }
   };
 
@@ -459,7 +330,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
                 <div>
                   <div className="ev-label">Screenshots</div>
                   <div className="mt-1 text-sm text-[var(--takeoff-text-muted)]">
-                    Capture the current page, snip a region, upload images, or paste from clipboard.
+                    Use your computer screenshot tool, then paste or upload the image.
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -467,10 +338,13 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={capturePageSurface}
-                    disabled={isCapturing || isSubmitting || attachments.length >= MAX_ATTACHMENTS}
+                    onClick={() => {
+                      setError(null);
+                      setShowScreenshotHelp((current) => !current);
+                    }}
+                    disabled={isSubmitting || attachments.length >= MAX_ATTACHMENTS}
                   >
-                    {isCapturing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                    <Camera className="h-4 w-4" />
                     Capture
                   </Button>
                   <Button
@@ -485,6 +359,48 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
                   </Button>
                 </div>
               </div>
+
+              {showScreenshotHelp ? (
+                <div className="mt-4 rounded-[14px] border border-[var(--takeoff-line)] bg-white p-4 text-sm text-[var(--takeoff-ink)]">
+                  <div className="font-semibold">Take a screenshot with your computer</div>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-[12px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] p-3">
+                      <div className="ev-label">Mac</div>
+                      <div className="mt-1 text-[var(--takeoff-text-muted)]">
+                        Press <span className="font-semibold text-[var(--takeoff-ink)]">Command + Shift + 4</span>, select the area, then upload the file. Use <span className="font-semibold text-[var(--takeoff-ink)]">Control + Command + Shift + 4</span> to copy it, then paste here.
+                      </div>
+                    </div>
+                    <div className="rounded-[12px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] p-3">
+                      <div className="ev-label">Windows</div>
+                      <div className="mt-1 text-[var(--takeoff-text-muted)]">
+                        Press <span className="font-semibold text-[var(--takeoff-ink)]">Windows + Shift + S</span>, select the area, then paste here.
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={readClipboardScreenshots}
+                      disabled={isReadingClipboard || isSubmitting || attachments.length >= MAX_ATTACHMENTS}
+                    >
+                      {isReadingClipboard ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                      Attach from clipboard
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isSubmitting || attachments.length >= MAX_ATTACHMENTS}
+                    >
+                      <ImagePlus className="h-4 w-4" />
+                      Upload screenshot
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
 
               <input
                 ref={fileInputRef}
@@ -532,7 +448,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
           </div>
 
           <DialogFooter className="border-t border-[var(--takeoff-line)] px-6 py-4">
-            <Button type="submit" disabled={isSubmitting || isCapturing}>
+            <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Send request
             </Button>
@@ -541,62 +457,6 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
       </DialogContent>
     </Dialog>
 
-      {snipImage ? (
-        <div data-support-capture-exclude className="fixed inset-0 z-[80] bg-[rgba(10,15,12,0.88)] p-4 text-[var(--takeoff-ink)]">
-          <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-[18px] border border-[rgba(216,222,212,0.18)] bg-[var(--takeoff-paper-strong)] shadow-2xl">
-            <div className="flex flex-col gap-3 border-b border-[var(--takeoff-line)] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="ev-label">Screen snip</div>
-                <div className="mt-1 text-lg font-semibold tracking-[-0.03em] text-[var(--takeoff-ink)]">
-                  Drag over the issue, or attach the visible page.
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={cancelSnip}>
-                  Cancel
-                </Button>
-                <Button type="button" variant="outline" onClick={() => attachSnip('full')}>
-                  Use visible page
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => attachSnip('selection')}
-                  disabled={!snipSelection || snipSelection.width < 8 || snipSelection.height < 8}
-                >
-                  Attach selection
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#0e1511] p-5">
-              <div className="relative max-h-full max-w-full">
-                <img
-                  ref={snipImageRef}
-                  src={snipImage.dataUrl}
-                  alt=""
-                  draggable={false}
-                  onPointerDown={handleSnipPointerDown}
-                  onPointerMove={handleSnipPointerMove}
-                  onPointerUp={handleSnipPointerUp}
-                  onPointerCancel={handleSnipPointerUp}
-                  className="block max-h-[calc(100vh-180px)] max-w-full select-none rounded-[12px] border border-[rgba(216,222,212,0.18)] object-contain"
-                />
-                {snipSelection && snipImageRef.current ? (
-                  <div
-                    className="pointer-events-none absolute border-2 border-white bg-white/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.42)]"
-                    style={{
-                      left: `${(snipSelection.x / snipImage.width) * 100}%`,
-                      top: `${(snipSelection.y / snipImage.height) * 100}%`,
-                      width: `${(snipSelection.width / snipImage.width) * 100}%`,
-                      height: `${(snipSelection.height / snipImage.height) * 100}%`,
-                    }}
-                  />
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </>
   );
 }
