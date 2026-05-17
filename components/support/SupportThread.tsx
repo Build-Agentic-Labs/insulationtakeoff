@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from 'react';
-import { Loader2, MailWarning, Send } from 'lucide-react';
+import { Loader2, MailWarning, MessageSquare, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { SupportMessage, SupportTicket } from './SupportQueue';
@@ -100,10 +100,25 @@ export function SupportThread({ ticket, viewerRole, onTicketUpdated }: SupportTh
   };
 
   return (
-    <div className="space-y-4">
-      <div className="ev-label">Conversation</div>
+    <div className="rounded-[16px] border border-[var(--takeoff-line)] bg-white p-4">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--takeoff-line)] pb-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-9 w-9 items-center justify-center rounded-[12px] bg-[var(--takeoff-paper)]">
+            <MessageSquare className="h-4 w-4 text-[var(--takeoff-ink)]" />
+          </span>
+          <div>
+            <div className="ev-label">Conversation</div>
+            <div className="mt-1 text-sm font-semibold text-[var(--takeoff-ink)]">
+              {messages.length} message{messages.length === 1 ? '' : 's'}
+            </div>
+          </div>
+        </div>
+        <div className="takeoff-mono text-xs text-[var(--takeoff-text-muted)]">
+          Oldest first
+        </div>
+      </div>
 
-      <div className="space-y-3">
+      <div className="mt-4 space-y-3">
         {messages.map((message) => {
           const isOwnMessage = message.author_role === viewerRole;
 
@@ -117,19 +132,24 @@ export function SupportThread({ ticket, viewerRole, onTicketUpdated }: SupportTh
                   : "border-[var(--takeoff-line)] bg-white"
               )}
             >
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm font-semibold text-[var(--takeoff-ink)]">
-                  {getMessageLabel(message, viewerRole)}
-                  <span className="ml-2 font-normal text-[var(--takeoff-text-muted)]">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[var(--takeoff-ink)]">
+                    {getMessageLabel(message, viewerRole)}
+                  </div>
+                  <div className="mt-1 truncate text-xs text-[var(--takeoff-text-muted)]">
                     {message.author_email}
-                  </span>
+                  </div>
                 </div>
-                <div className="text-xs text-[var(--takeoff-text-muted)]">
-                  {getMessageSourceLabel(message)} · {formatDate(message.created_at)}
+                <div className="shrink-0 rounded-full border border-[var(--takeoff-line)] bg-white px-2.5 py-1 text-[10px] font-semibold uppercase text-[var(--takeoff-text-muted)]">
+                  {getMessageSourceLabel(message)}
                 </div>
               </div>
-              <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--takeoff-ink)]">
+              <div className="mt-3 whitespace-pre-wrap rounded-[12px] border border-[var(--takeoff-line)] bg-[rgba(255,255,255,0.62)] px-3 py-3 text-sm leading-6 text-[var(--takeoff-ink)]">
                 {message.body}
+              </div>
+              <div className="mt-2 text-xs text-[var(--takeoff-text-muted)]">
+                {formatDate(message.created_at)}
               </div>
               {message.notification_status === 'failed' ? (
                 <div className="mt-3 rounded-[12px] border border-[rgba(215,25,33,0.22)] bg-[rgba(215,25,33,0.08)] px-3 py-2 text-xs leading-5 text-[var(--takeoff-accent)]">
@@ -151,7 +171,8 @@ export function SupportThread({ ticket, viewerRole, onTicketUpdated }: SupportTh
         </div>
       ) : null}
 
-      <div className="rounded-[14px] border border-[var(--takeoff-line)] bg-white p-3">
+      <div className="mt-4 rounded-[14px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] p-3">
+        <div className="mb-2 text-xs font-semibold text-[var(--takeoff-text-muted)]">Reply</div>
         <textarea
           value={reply}
           onChange={(event) => setReply(event.target.value)}

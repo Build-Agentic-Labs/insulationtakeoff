@@ -5,6 +5,7 @@ import { authApiErrorResponse } from '@/lib/supabase/api-errors';
 import { requireServerCompanyMembership } from '@/lib/supabase/company-server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import type { Database } from '@/lib/supabase/types';
+import { isSupportAdminEmail } from '@/lib/support/admin-access';
 import { getSupportTicketReplyAddress, SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
 
 type SupportMessageInsert = Database['public']['Tables']['support_ticket_messages']['Insert'];
@@ -69,7 +70,7 @@ export async function POST(
       return NextResponse.json({ error: 'Support ticket not found' }, { status: 404 });
     }
 
-    const isAdmin = role === 'owner' || role === 'admin';
+    const isAdmin = (role === 'owner' || role === 'admin') && isSupportAdminEmail(user.email);
     const isSubmitter = ticket.user_id === user.id;
     const requestedRole = body.authorRole === 'support' ? 'support' : 'customer';
 

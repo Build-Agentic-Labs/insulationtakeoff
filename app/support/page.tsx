@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { SupportQueue, type SupportTicket } from '@/components/support/SupportQueue';
-import { requireServerCompanyAdmin } from '@/lib/supabase/company-server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { requireServerSupportAdmin } from '@/lib/support/admin-access-server';
 import { SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,7 @@ export default async function SupportPage({
   let companyId: string;
 
   try {
-    const membership = await requireServerCompanyAdmin();
+    const membership = await requireServerSupportAdmin();
     companyId = membership.companyId;
   } catch {
     notFound();

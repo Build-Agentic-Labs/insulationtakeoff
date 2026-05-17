@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { SupportDialog } from '@/components/support/SupportDialog';
 import { supabase } from '@/lib/supabase/client';
+import { isSupportAdminEmail } from '@/lib/support/admin-access';
 import {
   Users,
   Settings,
@@ -46,7 +47,7 @@ const navItems: NavItem[] = [
     icon: <Settings className="h-5 w-5" />,
   },
   {
-    title: 'Support',
+    title: 'My Tickets',
     href: '/support/tickets',
     icon: <LifeBuoy className="h-5 w-5" />,
   },
@@ -129,11 +130,12 @@ export function Sidebar() {
     return null;
   }
 
-  const visibleNavItems: NavItem[] = userRole === 'owner' || userRole === 'admin'
+  const canSeeSupportAdmin = (userRole === 'owner' || userRole === 'admin') && isSupportAdminEmail(userEmail);
+  const visibleNavItems: NavItem[] = canSeeSupportAdmin
     ? [
       ...navItems,
       {
-        title: 'Support Inbox',
+        title: 'Admin Inbox',
         href: '/support',
         icon: <Inbox className="h-5 w-5" />,
         exact: true,

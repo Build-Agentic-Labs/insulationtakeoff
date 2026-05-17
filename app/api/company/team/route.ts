@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
 
     if (!authUser) {
       return NextResponse.json(
-        { error: 'Create this user in Supabase Auth first, then add them to the workspace.' },
+        { error: 'Create this user account first, then add them to the workspace.' },
         { status: 404 }
       );
     }

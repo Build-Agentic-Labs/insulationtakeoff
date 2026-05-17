@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { ExternalLink, ImageIcon, Inbox, Loader2, RefreshCw, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -60,7 +60,6 @@ function statusSummary(status: SupportStatus) {
 
 export function MySupportTickets({ initialTickets, initialSelectedTicketId }: MySupportTicketsProps) {
   const [tickets, setTickets] = useState(initialTickets);
-  const [activeStatus, setActiveStatus] = useState<SupportStatus | 'all'>('all');
   const [selectedTicketId, setSelectedTicketId] = useState(
     initialSelectedTicketId && initialTickets.some((ticket) => ticket.id === initialSelectedTicketId)
       ? initialSelectedTicketId
@@ -69,19 +68,7 @@ export function MySupportTickets({ initialTickets, initialSelectedTicketId }: My
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const filteredTickets = useMemo(() => {
-    if (activeStatus === 'all') return tickets;
-    return tickets.filter((ticket) => ticket.status === activeStatus);
-  }, [activeStatus, tickets]);
-
-  const selectedTicket = filteredTickets.find((ticket) => ticket.id === selectedTicketId) ?? filteredTickets[0] ?? null;
-
-  const counts = useMemo(() => ({
-    all: tickets.length,
-    open: tickets.filter((ticket) => ticket.status === 'open').length,
-    in_progress: tickets.filter((ticket) => ticket.status === 'in_progress').length,
-    resolved: tickets.filter((ticket) => ticket.status === 'resolved').length,
-  }), [tickets]);
+  const selectedTicket = tickets.find((ticket) => ticket.id === selectedTicketId) ?? tickets[0] ?? null;
 
   const refreshTickets = async () => {
     setIsRefreshing(true);
@@ -139,33 +126,15 @@ export function MySupportTickets({ initialTickets, initialSelectedTicketId }: My
 
           <div className="grid gap-5 xl:grid-cols-[400px_1fr]">
             <section className="rounded-[18px] border border-[var(--takeoff-line)] bg-[rgba(255,255,255,0.88)]">
-              <div className="flex flex-wrap gap-2 border-b border-[var(--takeoff-line)] p-3">
-                {(['all', 'open', 'in_progress', 'resolved'] as const).map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() => setActiveStatus(status)}
-                    className={cn(
-                      "rounded-[12px] border px-3 py-1.5 text-xs font-semibold transition-colors",
-                      activeStatus === status
-                        ? "border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] text-white"
-                        : "border-[var(--takeoff-line)] bg-white text-[var(--takeoff-text-muted)] hover:text-[var(--takeoff-ink)]"
-                    )}
-                  >
-                    {status === 'all' ? 'All' : STATUS_LABELS[status]} {counts[status]}
-                  </button>
-                ))}
-              </div>
-
               <div className="max-h-[68vh] overflow-y-auto">
-                {filteredTickets.length === 0 ? (
+                {tickets.length === 0 ? (
                   <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center text-[var(--takeoff-text-muted)]">
                     <Inbox className="mb-3 h-8 w-8" />
                     <div className="font-semibold text-[var(--takeoff-ink)]">No tickets</div>
                     <div className="mt-1 text-sm">Your submitted support requests will appear here.</div>
                   </div>
                 ) : (
-                  filteredTickets.map((ticket) => (
+                  tickets.map((ticket) => (
                     <button
                       key={ticket.id}
                       type="button"
@@ -219,14 +188,21 @@ export function MySupportTickets({ initialTickets, initialSelectedTicketId }: My
                     </div>
                   </div>
 
-                  <div className="grid flex-1 gap-5 p-5 lg:grid-cols-[1fr_280px]">
+                  <div className="grid flex-1 gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_280px]">
                     <div className="space-y-5">
                       <SupportThread ticket={selectedTicket} viewerRole="customer" onTicketUpdated={replaceTicket} />
 
-                      <div>
-                        <div className="ev-label">Screenshots</div>
+                      <section className="rounded-[16px] border border-[var(--takeoff-line)] bg-white p-4">
+                        <div className="flex items-center justify-between gap-3 border-b border-[var(--takeoff-line)] pb-3">
+                          <div>
+                            <div className="ev-label">Screenshots</div>
+                            <div className="mt-1 text-sm font-semibold text-[var(--takeoff-ink)]">
+                              {selectedTicket.attachments.length} attachment{selectedTicket.attachments.length === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                        </div>
                         {selectedTicket.attachments.length > 0 ? (
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <div className="mt-4 grid gap-3 md:grid-cols-2">
                             {selectedTicket.attachments.map((attachment) => (
                               <a
                                 key={attachment.id}
@@ -253,48 +229,61 @@ export function MySupportTickets({ initialTickets, initialSelectedTicketId }: My
                             ))}
                           </div>
                         ) : (
-                          <div className="mt-2 rounded-[14px] border border-[var(--takeoff-line)] bg-white px-4 py-4 text-sm text-[var(--takeoff-text-muted)]">
+                          <div className="mt-4 rounded-[14px] border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-4 py-4 text-sm text-[var(--takeoff-text-muted)]">
                             No screenshots attached.
                           </div>
                         )}
-                      </div>
+                      </section>
                     </div>
 
-                    <aside className="space-y-4 rounded-[14px] border border-[var(--takeoff-line)] bg-white p-4">
-                      <div>
-                        <div className="ev-label">Project</div>
-                        <div className="mt-1 text-sm text-[var(--takeoff-ink)]">
-                          {selectedTicket.project?.name ?? 'No project context'}
+                    <aside className="h-fit rounded-[16px] border border-[var(--takeoff-line)] bg-white p-4">
+                      <div className="border-b border-[var(--takeoff-line)] pb-3">
+                        <div className="ev-label">Ticket context</div>
+                        <div className="mt-1 text-sm font-semibold text-[var(--takeoff-ink)]">
+                          Request details
                         </div>
                       </div>
-                      <div>
-                        <div className="ev-label">Page</div>
-                        {selectedTicket.page_url ? (
-                          <a
-                            href={selectedTicket.page_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="mt-1 block break-all text-sm text-[var(--takeoff-ink)] underline-offset-4 hover:underline"
-                          >
-                            {selectedTicket.page_url}
-                          </a>
-                        ) : (
-                          <div className="mt-1 text-sm text-[var(--takeoff-text-muted)]">No page URL</div>
-                        )}
-                      </div>
-                      <div>
-                        <div className="ev-label">Updated</div>
-                        <div className="mt-1 text-sm text-[var(--takeoff-ink)]">{formatDate(selectedTicket.updated_at)}</div>
-                      </div>
-                      {selectedTicket.resolved_at ? (
-                        <div>
-                          <div className="ev-label">Resolved</div>
-                          <div className="mt-1 text-sm text-[var(--takeoff-ink)]">{formatDate(selectedTicket.resolved_at)}</div>
+
+                      <div className="divide-y divide-[var(--takeoff-line)]">
+                        <div className="py-3">
+                          <div className="ev-label">Project</div>
+                          <div className="mt-1 text-sm text-[var(--takeoff-ink)]">
+                            {selectedTicket.project?.name ?? 'No project context'}
+                          </div>
                         </div>
-                      ) : null}
-                      <div>
-                        <div className="ev-label">Ticket ID</div>
-                        <div className="takeoff-mono mt-1 break-all text-xs text-[var(--takeoff-text-muted)]">{selectedTicket.id}</div>
+
+                        <div className="py-3">
+                          <div className="ev-label">Page</div>
+                          {selectedTicket.page_url ? (
+                            <a
+                              href={selectedTicket.page_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-1 block break-all text-sm leading-5 text-[var(--takeoff-ink)] underline-offset-4 hover:underline"
+                            >
+                              {selectedTicket.page_url}
+                            </a>
+                          ) : (
+                            <div className="mt-1 text-sm text-[var(--takeoff-text-muted)]">No page URL</div>
+                          )}
+                        </div>
+
+                        <div className="py-3">
+                          <div className="ev-label">Updated</div>
+                          <div className="mt-1 text-sm text-[var(--takeoff-ink)]">{formatDate(selectedTicket.updated_at)}</div>
+                        </div>
+
+                        {selectedTicket.resolved_at ? (
+                          <div className="py-3">
+                            <div className="ev-label">Resolved</div>
+                            <div className="mt-1 text-sm text-[var(--takeoff-ink)]">{formatDate(selectedTicket.resolved_at)}</div>
+                          </div>
+                        ) : null}
+
+                        <div className="pt-3">
+                          <div className="ev-label">Ticket ID</div>
+                          <div className="takeoff-mono mt-1 break-all text-xs leading-5 text-[var(--takeoff-text-muted)]">{selectedTicket.id}</div>
+                        </div>
                       </div>
                     </aside>
                   </div>

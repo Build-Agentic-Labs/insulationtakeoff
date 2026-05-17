@@ -244,7 +244,7 @@ export default function SettingsPage() {
       setInviteRole('member');
       setTeamMessage(
         requiresConfirmation
-          ? `${addedEmail} was added to this workspace, but the Supabase Auth email is still unconfirmed. Send the confirmation email from Supabase before they sign in.`
+          ? `${addedEmail} was added to this workspace, but their account email is still unconfirmed. Send the confirmation email before they sign in.`
           : `${addedEmail} was added to this workspace.`
       );
       await loadTeam();
@@ -589,9 +589,9 @@ export default function SettingsPage() {
                       <UserPlus className="h-5 w-5 text-[var(--takeoff-ink)]" />
                     </span>
                     <div>
-                      <p className="font-semibold text-[var(--takeoff-ink)]">Add Supabase user</p>
+                      <p className="font-semibold text-[var(--takeoff-ink)]">Add workspace user</p>
                       <p className="text-sm text-[var(--takeoff-text-muted)]">
-                        Create the user in Supabase Auth first, then add that exact email to this workspace. No public signup or invite email is sent.
+                        Create the user account first, then add that exact email to this workspace. No public signup or invite email is sent.
                       </p>
                     </div>
                   </div>

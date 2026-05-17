@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sendSupportTicketEmail } from '@/lib/email/support';
 import { getAppBaseUrl } from '@/lib/email/resend';
 import { authApiErrorResponse } from '@/lib/supabase/api-errors';
-import { requireServerCompanyAdmin, requireServerCompanyMembership } from '@/lib/supabase/company-server';
+import { requireServerCompanyMembership } from '@/lib/supabase/company-server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import type { Database, Json } from '@/lib/supabase/types';
+import { requireServerSupportAdmin } from '@/lib/support/admin-access-server';
 import { SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
 import { getProjectRefColumn } from '@/lib/projects/slug';
 import {
@@ -267,7 +268,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const { companyId } = await requireServerCompanyAdmin();
+    const { companyId } = await requireServerSupportAdmin();
     const status = request.nextUrl.searchParams.get('status');
 
     let query = supabaseAdmin

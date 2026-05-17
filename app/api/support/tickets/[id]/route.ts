@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authApiErrorResponse } from '@/lib/supabase/api-errors';
-import { requireServerCompanyAdmin } from '@/lib/supabase/company-server';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import type { Database } from '@/lib/supabase/types';
+import { requireServerSupportAdmin } from '@/lib/support/admin-access-server';
 import { SUPPORT_TICKET_WITH_THREAD_SELECT } from '@/lib/support/tickets';
 
 type SupportStatus = Database['public']['Tables']['support_tickets']['Row']['status'];
@@ -15,7 +15,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const { companyId } = await requireServerCompanyAdmin();
+    const { companyId } = await requireServerSupportAdmin();
 
     const { data, error } = await supabaseAdmin
       .from('support_tickets')
@@ -41,7 +41,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const { companyId, user } = await requireServerCompanyAdmin();
+    const { companyId, user } = await requireServerSupportAdmin();
     const body = await request.json();
 
     if (!SUPPORT_STATUSES.includes(body.status)) {

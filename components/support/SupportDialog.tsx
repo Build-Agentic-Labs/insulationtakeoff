@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, type ClipboardEvent, type FormEvent, useEffect, useRef, useState } from 'react';
+import { type ChangeEvent, type ClipboardEvent, type FormEvent, type PointerEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Camera, ImagePlus, Loader2, Paperclip, Send, X } from 'lucide-react';
@@ -31,6 +31,19 @@ interface SupportAttachment {
   previewUrl: string;
 }
 
+interface SnipImage {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+interface SnipSelection {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 function getProjectId(pathname: string) {
   const match = pathname.match(/^\/projects\/([^/]+)/);
   return match?.[1] ?? null;
@@ -58,14 +71,37 @@ async function waitForVideoFrame(video: HTMLVideoElement) {
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
 }
 
+async function canvasToPngBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((result) => {
+      if (result) resolve(result);
+      else reject(new Error('Unable to save captured screenshot.'));
+    }, 'image/png');
+  });
+}
+
+function normalizeSelection(startX: number, startY: number, endX: number, endY: number): SnipSelection {
+  return {
+    x: Math.min(startX, endX),
+    y: Math.min(startY, endY),
+    width: Math.abs(endX - startX),
+    height: Math.abs(endY - startY),
+  };
+}
+
 export function SupportDialog({ collapsed = false }: SupportDialogProps) {
   const pathname = usePathname();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const snipImageRef = useRef<HTMLImageElement | null>(null);
+  const snipStartRef = useRef<{ x: number; y: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<SupportAttachment[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [snipImage, setSnipImage] = useState<SnipImage | null>(null);
+  const [snipSelection, setSnipSelection] = useState<SnipSelection | null>(null);
+  const [isDraggingSnip, setIsDraggingSnip] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -130,15 +166,22 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
   const captureScreen = async () => {
     setError(null);
 
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      setError(`Attach up to ${MAX_ATTACHMENTS} screenshots.`);
+      return;
+    }
+
     if (!navigator.mediaDevices?.getDisplayMedia) {
       setError('Screen capture is not available in this browser.');
       return;
     }
 
     setIsCapturing(true);
+    setOpen(false);
     let stream: MediaStream | null = null;
 
     try {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: false,
@@ -163,20 +206,12 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
       }
 
       context.drawImage(video, 0, 0, width, height);
-
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((result) => {
-          if (result) resolve(result);
-          else reject(new Error('Unable to save captured screenshot.'));
-        }, 'image/png');
+      setSnipImage({
+        dataUrl: canvas.toDataURL('image/png'),
+        width,
+        height,
       });
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      addFiles([
-        new File([blob], `screen-capture-${timestamp}.png`, {
-          type: 'image/png',
-        }),
-      ]);
+      setSnipSelection(null);
     } catch (captureError) {
       const message = captureError instanceof DOMException && captureError.name === 'NotAllowedError'
         ? 'Screen capture was cancelled or blocked.'
@@ -184,9 +219,103 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
           ? captureError.message
           : 'Screen capture failed.';
       setError(message);
+      setOpen(true);
     } finally {
       stream?.getTracks().forEach((track) => track.stop());
       setIsCapturing(false);
+    }
+  };
+
+  const getSnipPoint = (event: PointerEvent<HTMLImageElement>) => {
+    const image = snipImageRef.current;
+    if (!image || !snipImage) return null;
+
+    const rect = image.getBoundingClientRect();
+    const x = Math.max(0, Math.min(snipImage.width, ((event.clientX - rect.left) / rect.width) * snipImage.width));
+    const y = Math.max(0, Math.min(snipImage.height, ((event.clientY - rect.top) / rect.height) * snipImage.height));
+    return { x, y };
+  };
+
+  const handleSnipPointerDown = (event: PointerEvent<HTMLImageElement>) => {
+    const point = getSnipPoint(event);
+    if (!point) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    snipStartRef.current = point;
+    setIsDraggingSnip(true);
+    setSnipSelection({ x: point.x, y: point.y, width: 0, height: 0 });
+  };
+
+  const handleSnipPointerMove = (event: PointerEvent<HTMLImageElement>) => {
+    if (!isDraggingSnip || !snipStartRef.current) return;
+    const point = getSnipPoint(event);
+    if (!point) return;
+
+    setSnipSelection(normalizeSelection(snipStartRef.current.x, snipStartRef.current.y, point.x, point.y));
+  };
+
+  const handleSnipPointerUp = (event: PointerEvent<HTMLImageElement>) => {
+    if (!isDraggingSnip) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    setIsDraggingSnip(false);
+    snipStartRef.current = null;
+  };
+
+  const cancelSnip = () => {
+    setSnipImage(null);
+    setSnipSelection(null);
+    snipStartRef.current = null;
+    setIsDraggingSnip(false);
+    setOpen(true);
+  };
+
+  const attachSnip = async (mode: 'full' | 'selection') => {
+    if (!snipImage) return;
+    setError(null);
+
+    try {
+      const sourceImage = new Image();
+      sourceImage.src = snipImage.dataUrl;
+      await sourceImage.decode();
+
+      const selection = mode === 'selection' && snipSelection && snipSelection.width >= 8 && snipSelection.height >= 8
+        ? snipSelection
+        : { x: 0, y: 0, width: snipImage.width, height: snipImage.height };
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(selection.width);
+      canvas.height = Math.round(selection.height);
+
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('Unable to prepare selected screenshot.');
+      }
+
+      context.drawImage(
+        sourceImage,
+        selection.x,
+        selection.y,
+        selection.width,
+        selection.height,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+      const blob = await canvasToPngBlob(canvas);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      addFiles([
+        new File([blob], mode === 'selection' ? `screen-snip-${timestamp}.png` : `screen-capture-${timestamp}.png`, {
+          type: 'image/png',
+        }),
+      ]);
+
+      setSnipImage(null);
+      setSnipSelection(null);
+      setOpen(true);
+    } catch (snipError) {
+      setError(snipError instanceof Error ? snipError.message : 'Unable to attach screenshot.');
+      setOpen(true);
     }
   };
 
@@ -265,14 +394,15 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => {
-      setOpen(nextOpen);
-      if (nextOpen) {
-        setError(null);
-        setSuccessMessage(null);
-        setSuccessTicketId(null);
-      }
-    }}>
+    <>
+      <Dialog open={open} onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (nextOpen) {
+          setError(null);
+          setSuccessMessage(null);
+          setSuccessTicketId(null);
+        }
+      }}>
       <DialogTrigger asChild>
         <button
           className={cn(
@@ -352,7 +482,7 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
                 <div>
                   <div className="ev-label">Screenshots</div>
                   <div className="mt-1 text-sm text-[var(--takeoff-text-muted)]">
-                    Capture the screen, upload images, or paste from clipboard.
+                    Capture the screen, snip a region, upload images, or paste from clipboard.
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -433,5 +563,63 @@ export function SupportDialog({ collapsed = false }: SupportDialogProps) {
         </form>
       </DialogContent>
     </Dialog>
+
+      {snipImage ? (
+        <div className="fixed inset-0 z-[80] bg-[rgba(10,15,12,0.88)] p-4 text-[var(--takeoff-ink)]">
+          <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-[18px] border border-[rgba(216,222,212,0.18)] bg-[var(--takeoff-paper-strong)] shadow-2xl">
+            <div className="flex flex-col gap-3 border-b border-[var(--takeoff-line)] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="ev-label">Screen snip</div>
+                <div className="mt-1 text-lg font-semibold tracking-[-0.03em] text-[var(--takeoff-ink)]">
+                  Drag over the issue, or attach the full screen.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={cancelSnip}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="outline" onClick={() => attachSnip('full')}>
+                  Use full screen
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => attachSnip('selection')}
+                  disabled={!snipSelection || snipSelection.width < 8 || snipSelection.height < 8}
+                >
+                  Attach selection
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-[#0e1511] p-5">
+              <div className="relative max-h-full max-w-full">
+                <img
+                  ref={snipImageRef}
+                  src={snipImage.dataUrl}
+                  alt=""
+                  draggable={false}
+                  onPointerDown={handleSnipPointerDown}
+                  onPointerMove={handleSnipPointerMove}
+                  onPointerUp={handleSnipPointerUp}
+                  onPointerCancel={handleSnipPointerUp}
+                  className="block max-h-[calc(100vh-180px)] max-w-full select-none rounded-[12px] border border-[rgba(216,222,212,0.18)] object-contain"
+                />
+                {snipSelection && snipImageRef.current ? (
+                  <div
+                    className="pointer-events-none absolute border-2 border-white bg-white/10 shadow-[0_0_0_9999px_rgba(0,0,0,0.42)]"
+                    style={{
+                      left: `${(snipSelection.x / snipImage.width) * 100}%`,
+                      top: `${(snipSelection.y / snipImage.height) * 100}%`,
+                      width: `${(snipSelection.width / snipImage.width) * 100}%`,
+                      height: `${(snipSelection.height / snipImage.height) * 100}%`,
+                    }}
+                  />
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

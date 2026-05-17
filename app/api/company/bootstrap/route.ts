@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
 
   if ((companyCount ?? 0) > 0) {
     return NextResponse.json(
-      { error: 'Workspace access required. Ask an owner or admin to add this Supabase Auth user to the company workspace.' },
+      { error: 'Workspace access required. Ask an owner or admin to add this user to the company workspace.' },
       { status: 403 }
     );
   }
