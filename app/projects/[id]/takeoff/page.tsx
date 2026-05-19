@@ -3,7 +3,9 @@
 import { use, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Check, HelpCircle, Loader2, Save } from 'lucide-react';
+import * as pdfjs from 'pdfjs-dist';
 import { v4 as uuid } from 'uuid';
+import { getLocalPdfWorkerSrc } from '@/lib/pdf/pdfjs-worker';
 import { supabase } from '@/lib/supabase/client';
 import { getActiveCompanyId } from '@/lib/supabase/company';
 import { useTakeoffStore } from '@/lib/stores/takeoff-store';
@@ -48,6 +50,8 @@ import {
   normalizeOpeningScheduleItems,
 } from '@/lib/takeoff/opening-schedule';
 import { getPublicAnalysisError } from '@/lib/takeoff/analysis-errors';
+
+pdfjs.GlobalWorkerOptions.workerSrc = getLocalPdfWorkerSrc();
 
 // Classification result from the API
 interface PageClassification {
@@ -1342,9 +1346,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     );
 
     try {
-      const pdfjs = await import('pdfjs-dist');
-      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
-
       const loadingTask = pdfjs.getDocument(url);
       const pdf = await loadingTask.promise;
       const numPages = pdf.numPages;
@@ -1673,8 +1674,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     );
 
     try {
-      const pdfjs = await import('pdfjs-dist');
-      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
       const loadingTask = pdfjs.getDocument(pdfUrl);
       const pdf = await loadingTask.promise;
       const numPages = pdf.numPages;
@@ -1785,8 +1784,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     );
 
     try {
-      const pdfjs = await import('pdfjs-dist');
-      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
       const loadingTask = pdfjs.getDocument(pdfUrl);
       const pdf = await loadingTask.promise;
       const page = await pdf.getPage(pageIndex + 1);
@@ -1898,8 +1895,6 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     );
 
     try {
-      const pdfjs = await import('pdfjs-dist');
-      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
       const loadingTask = pdfjs.getDocument(pdfUrl);
       const pdf = await loadingTask.promise;
       let nextResults = classifications;
@@ -2438,6 +2433,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
             <TakeoffAnalysisScreen
               key={visionScanRunId}
               pdfUrl={pdfUrl}
+              documentId={documentId}
               totalPages={totalPages}
               pageScores={pageScores}
               isClassifying={isClassifying}

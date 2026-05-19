@@ -331,7 +331,6 @@ function zoneHintEvidence(page: PageAnalysis, key: AnticipatedZoneSignal['key'])
   if (!hint) return [];
 
   return uniqueList([
-    ...(hint.notes ?? []),
     ...(hint.r_value_details ?? hint.r_values ?? []).map((value) => `Detected ${value}`),
     ...(hint.wall_framing ?? []).map((value) => `Detected ${value} framing`),
     ...(hint.insulation_types ?? []).map((value) => `Detected ${value}`),
@@ -472,7 +471,7 @@ export function buildAnticipatedZonesFromPageAnalysis(
 
   const crawlspace = collect(
     'crawlspace',
-    'Crawlspace',
+    'Crawlspace / Floor',
     (page) =>
       Boolean(zoneHintFor(page, 'crawlspace')) || capabilityScore(page, 'crawlspace_scope') >= 0.58,
     (page) => [

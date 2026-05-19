@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pdfjs } from 'react-pdf';
+import { getReactPdfWorkerSrc } from '@/lib/pdf/pdfjs-worker';
 import { useTakeoffStore } from '@/lib/stores/takeoff-store';
 import type { BlueprintViewerHandle } from '@/components/takeoff/BlueprintViewer';
 import { openingAreaSf, type Opening, type PdfPoint, type Trace } from '@/lib/types/takeoff';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = getReactPdfWorkerSrc();
 
 type WindowToolMode = 'idle' | 'capture' | 'place';
 

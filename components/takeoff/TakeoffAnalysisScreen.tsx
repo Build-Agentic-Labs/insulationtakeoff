@@ -14,17 +14,25 @@ import {
 } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { BlueprintViewer } from '@/components/takeoff/BlueprintViewer';
+import { getReactPdfWorkerSrc } from '@/lib/pdf/pdfjs-worker';
 import {
   buildPageAnalysisFromPageScores,
   getEvidenceRequirementStatuses,
 } from '@/lib/takeoff/workspace-v2';
 import { getPublicAnalysisError } from '@/lib/takeoff/analysis-errors';
+import {
+  getCachedPdfThumbnail,
+  makePdfThumbnailCacheKey,
+  setCachedPdfThumbnail,
+} from '@/lib/takeoff/pdf-thumbnail-cache';
 import type { PageScore, PageRole } from '@/lib/types/takeoff';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = getReactPdfWorkerSrc();
 
 const ROLE_ORDER: PageRole[] = ['measurement', 'evidence'];
 const PREVIEW_MOTION_MS = 320;
+const THUMBNAIL_MIN_HEIGHT = 170;
+const THUMBNAIL_MAX_HEIGHT = 360;
 
 interface PreviewOriginRect {
   left: number;
@@ -51,6 +59,7 @@ type OpeningCatalogRow = NonNullable<NonNullable<PageScore['scan_extracts']>['op
 
 interface TakeoffAnalysisScreenProps {
   pdfUrl: string;
+  documentId: string | null;
   totalPages: number;
   pageScores: PageScore[];
   isClassifying: boolean;
@@ -69,7 +78,7 @@ interface TakeoffAnalysisScreenProps {
   onRetryScheduleScan: () => void;
   onAnalyzeScheduleCrop: (pageIndex: number, bbox: CropBox) => void;
   onAnalyzeScheduleCrops: (crops: Array<{ pageIndex: number; bbox: CropBox }>) => void;
-  onContinue: (scores: PageScore[]) => void;
+  onContinue: (scores: PageScore[]) => void | Promise<void>;
 }
 
 function roleLabel(role: PageRole) {
@@ -245,20 +254,41 @@ function ZoneHintSummary({ page }: { page: PageScore }) {
 }
 
 function ThumbnailPreview({
+  cacheScope,
+  pdfUrl,
   pageNumber,
   selected,
   renderPreview = true,
   onSelect,
   onAspectRatio,
+  aspectRatio,
 }: {
+  cacheScope: string;
+  pdfUrl: string;
   pageNumber: number;
   selected: boolean;
   renderPreview?: boolean;
   onSelect: (rect: PreviewOriginRect) => void;
   onAspectRatio: (ratio: number) => void;
+  aspectRatio: number | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [thumbnailWidth, setThumbnailWidth] = useState(240);
+  const [cachedThumbnail, setCachedThumbnail] = useState<string | null>(null);
+  const [cacheChecked, setCacheChecked] = useState(false);
+  const cacheKey = useMemo(
+    () => makePdfThumbnailCacheKey(cacheScope, pageNumber, thumbnailWidth),
+    [cacheScope, pageNumber, thumbnailWidth],
+  );
+  const reservedPreviewHeight = aspectRatio
+    ? Math.max(
+        THUMBNAIL_MIN_HEIGHT,
+        Math.min(
+          THUMBNAIL_MAX_HEIGHT,
+          Math.round(thumbnailWidth / Math.max(0.35, Math.min(2.5, aspectRatio))),
+        ),
+      )
+    : THUMBNAIL_MIN_HEIGHT;
 
   useEffect(() => {
     const element = containerRef.current;
@@ -275,6 +305,43 @@ function ThumbnailPreview({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCacheChecked(false);
+    setCachedThumbnail(null);
+
+    if (!renderPreview) {
+      setCacheChecked(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getCachedPdfThumbnail(cacheKey).then((dataUrl) => {
+      if (cancelled) return;
+      setCachedThumbnail(dataUrl);
+      setCacheChecked(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, renderPreview]);
+
+  const cacheRenderedThumbnail = useCallback(() => {
+    const canvas = containerRef.current?.querySelector('canvas');
+    if (!canvas) return;
+
+    requestAnimationFrame(() => {
+      try {
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+        void setCachedPdfThumbnail(cacheKey, dataUrl);
+      } catch {
+        // A failed thumbnail cache should not affect page selection.
+      }
+    });
+  }, [cacheKey]);
 
   return (
     <button
@@ -295,8 +362,15 @@ function ThumbnailPreview({
       }`}
       aria-label={`Select page ${pageNumber} preview`}
     >
-      <div ref={containerRef} className="flex w-full items-center justify-center overflow-hidden">
-        {renderPreview ? (
+      <div ref={containerRef} className="relative flex w-full items-center justify-center overflow-hidden">
+        {renderPreview && cachedThumbnail ? (
+          <img
+            src={cachedThumbnail}
+            alt={`Page ${pageNumber} preview`}
+            className="block max-h-[360px] w-full object-contain"
+            draggable={false}
+          />
+        ) : renderPreview && cacheChecked ? (
           <Page
             pageNumber={pageNumber}
             width={thumbnailWidth}
@@ -312,15 +386,24 @@ function ThumbnailPreview({
                 onAspectRatio(sourceWidth / sourceHeight);
               }
             }}
+            onRenderSuccess={cacheRenderedThumbnail}
             loading={
-              <div className="takeoff-blueprint-loading-dots takeoff-dot-grid flex h-[170px] w-full items-center justify-center bg-[var(--takeoff-canvas)] text-[11px] text-[var(--takeoff-text-subtle)]">
-                Preparing preview
+              <div
+                className="takeoff-blueprint-loading-dots takeoff-dot-grid relative w-full overflow-hidden bg-[var(--takeoff-canvas)]"
+                style={{ height: reservedPreviewHeight }}
+                aria-label="Preparing preview"
+              >
+                <div className="takeoff-thumbnail-sheen absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/35 to-transparent" />
               </div>
             }
           />
         ) : (
-          <div className="takeoff-blueprint-loading-dots takeoff-dot-grid flex h-[170px] w-full items-center justify-center bg-[var(--takeoff-canvas)] text-[11px] text-[var(--takeoff-text-subtle)]">
-            Preparing preview
+          <div
+            className="takeoff-blueprint-loading-dots takeoff-dot-grid relative w-full overflow-hidden bg-[var(--takeoff-canvas)]"
+            style={{ height: reservedPreviewHeight }}
+            aria-label={renderPreview ? 'Checking saved preview' : 'Preparing preview'}
+          >
+            <div className="takeoff-thumbnail-sheen absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/35 to-transparent" />
           </div>
         )}
       </div>
@@ -545,16 +628,16 @@ function ScheduleCropModal({
         onClick={onCancel}
         disabled={isParsingCrops}
         className="absolute right-7 top-7 z-[2] flex h-8 w-8 items-center justify-center rounded-full border border-[var(--takeoff-line)] bg-white text-[16px] font-semibold leading-none text-[var(--takeoff-ink)] shadow-[0_10px_24px_rgba(0,0,0,0.12)]"
-        aria-label="Close crop window"
+        aria-label="Close schedule selection window"
       >
         ×
       </button>
       <div className="mx-auto flex h-full max-w-[1280px] flex-col overflow-hidden rounded-[12px] border border-[rgba(255,255,255,0.16)] bg-white shadow-[0_32px_100px_rgba(0,0,0,0.28)]">
         <div className="flex items-center justify-between gap-3 border-b border-[var(--takeoff-line)] px-4 py-3">
           <div>
-            <div className="text-[13px] font-medium text-[var(--takeoff-ink)]">Crop opening schedule</div>
+            <div className="text-[13px] font-medium text-[var(--takeoff-ink)]">Select schedule tables</div>
             <div className="mt-0.5 text-[10px] text-[var(--takeoff-text-muted)]">
-              Drag each schedule table to save a crop. Hold Space to pan, then parse all saved crops.
+              Drag around each schedule table to add it. Hold Space to pan, then read all selected tables.
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -585,7 +668,7 @@ function ScheduleCropModal({
                   : 'border-[var(--takeoff-line)] bg-white text-[var(--takeoff-ink)]'
               }`}
             >
-              {cropMode ? 'Draw crop' : 'Pan / zoom'}
+              {cropMode ? 'Select tables' : 'Pan / zoom'}
             </button>
             <button
               type="button"
@@ -604,7 +687,7 @@ function ScheduleCropModal({
               }}
               className="h-8 rounded-full border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-3 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:border-[var(--takeoff-line)] disabled:bg-[var(--takeoff-paper)] disabled:text-[var(--takeoff-text-subtle)]"
             >
-              Undo last
+              Undo
             </button>
             <button
               type="button"
@@ -623,10 +706,10 @@ function ScheduleCropModal({
               {isParsingCrops ? (
                 <>
                   <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
-                  Parsing
+                  Reading
                 </>
               ) : (
-                <>Parse {savedCrops.length || ''} crop{savedCrops.length === 1 ? '' : 's'}</>
+                <>Read {savedCrops.length || ''} table{savedCrops.length === 1 ? '' : 's'}</>
               )}
             </button>
           </div>
@@ -634,7 +717,7 @@ function ScheduleCropModal({
         {savedCrops.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 border-b border-[var(--takeoff-line)] bg-[rgba(246,248,242,0.74)] px-4 py-2">
             <span className="takeoff-mono text-[9px] uppercase tracking-[0.12em] text-[var(--takeoff-text-subtle)]">
-              Saved crops
+              Selected tables
             </span>
             {savedCrops.map((item, index) => (
               <button
@@ -655,7 +738,7 @@ function ScheduleCropModal({
               <div className="flex items-center gap-3">
                 <Loader2 className="h-4 w-4 animate-spin text-[var(--takeoff-ink)]" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-semibold text-[var(--takeoff-ink)]">Parsing schedule crops</div>
+                  <div className="text-[12px] font-semibold text-[var(--takeoff-ink)]">Reading schedule tables</div>
                   <div className="mt-0.5 text-[10px] text-[var(--takeoff-text-muted)]">
                     Reading {savedCrops.length} selected table{savedCrops.length === 1 ? '' : 's'}.
                   </div>
@@ -901,21 +984,27 @@ function pageIsPending(page: PageScore) {
 }
 
 function AnalysisPageCard({
+  cacheScope,
+  pdfUrl,
   page,
   pending,
   selectedForPreview,
   renderThumbnail = true,
   onSelectPreview,
   onAspectRatio,
+  aspectRatio,
   onToggleRole,
   onClearRoles,
 }: {
+  cacheScope: string;
+  pdfUrl: string;
   page: PageScore;
   pending: boolean;
   selectedForPreview: boolean;
   renderThumbnail?: boolean;
   onSelectPreview: (pageIndex: number, rect: PreviewOriginRect) => void;
   onAspectRatio: (pageIndex: number, ratio: number) => void;
+  aspectRatio: number | null;
   onToggleRole: (pageIndex: number, role: PageRole) => void;
   onClearRoles: (pageIndex: number) => void;
 }) {
@@ -965,11 +1054,14 @@ function AnalysisPageCard({
 
       <div className="relative bg-[var(--takeoff-paper)] p-3">
         <ThumbnailPreview
+          cacheScope={cacheScope}
+          pdfUrl={pdfUrl}
           pageNumber={page.page_index + 1}
           selected={selectedForPreview}
           renderPreview={renderThumbnail}
           onSelect={(rect) => onSelectPreview(page.page_index, rect)}
           onAspectRatio={(ratio) => onAspectRatio(page.page_index, ratio)}
+          aspectRatio={aspectRatio}
         />
         {pending && (
           <div className="pointer-events-none absolute inset-3 rounded-[12px] border border-[#d4a843]/25 shadow-[inset_0_0_32px_rgba(212,168,67,0.1)]" />
@@ -1027,8 +1119,43 @@ function AnalysisPageCard({
   );
 }
 
+function VisionPageSkeletonGrid({ count = 6 }: { count?: number }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+      {Array.from({ length: count }, (_, index) => (
+        <div
+          key={index}
+          className="overflow-hidden rounded-[18px] border border-[var(--takeoff-line)] bg-white shadow-[0_14px_30px_rgba(31,39,33,0.06)]"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--takeoff-line)] px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="h-3 w-3/5 animate-pulse rounded-full bg-[#dfe7dc]" />
+              <div className="mt-2 h-2 w-1/3 animate-pulse rounded-full bg-[#e8eee4]" />
+            </div>
+            <div className="h-5 w-16 animate-pulse rounded-full bg-[#edf3ea]" />
+          </div>
+          <div className="bg-[var(--takeoff-paper)] p-3">
+            <div className="takeoff-blueprint-loading-dots takeoff-dot-grid flex h-[180px] items-center justify-center rounded-[12px] border border-[var(--takeoff-line)] bg-[var(--takeoff-canvas)]">
+              <div className="h-16 w-24 animate-pulse rounded-[8px] border border-[#d8e1d4] bg-white/70" />
+            </div>
+          </div>
+          <div className="space-y-2 px-4 pb-4">
+            <div className="h-2.5 w-full animate-pulse rounded-full bg-[#e5ece1]" />
+            <div className="h-2.5 w-3/4 animate-pulse rounded-full bg-[#edf3ea]" />
+            <div className="mt-3 flex gap-2 border-t border-[var(--takeoff-line)] pt-3">
+              <div className="h-6 w-24 animate-pulse rounded-full bg-[#e5ece1]" />
+              <div className="h-6 w-24 animate-pulse rounded-full bg-[#edf3ea]" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function TakeoffAnalysisScreen({
   pdfUrl,
+  documentId,
   totalPages,
   pageScores,
   isClassifying,
@@ -1049,6 +1176,7 @@ export function TakeoffAnalysisScreen({
   const [previewAspectRatios, setPreviewAspectRatios] = useState<Record<number, number>>({});
   const [openingCatalogModalOpen, setOpeningCatalogModalOpen] = useState(false);
   const [scheduleCropPageIndex, setScheduleCropPageIndex] = useState<number | null>(null);
+  const [isContinuingToZones, setIsContinuingToZones] = useState(false);
   const closePreviewTimeoutRef = useRef<number | null>(null);
 
   const effectivePageCount = totalPages || pageScores.length;
@@ -1106,6 +1234,15 @@ export function TakeoffAnalysisScreen({
       sensitivity: 'base',
     });
   });
+  const openingSchedulePageIndexes = useMemo(
+    () =>
+      new Set(
+        openingScheduleRows
+          .map((row) => row.sourcePageIndex)
+          .filter((pageIndex): pageIndex is number => typeof pageIndex === 'number'),
+      ),
+    [openingScheduleRows],
+  );
   const openingTagsOnlyPages = pageAnalysis.filter(
     (page) => page.roles.includes('measurement') && page.scanExtracts?.opening_evidence === 'tags_only',
   );
@@ -1125,11 +1262,7 @@ export function TakeoffAnalysisScreen({
       : null;
   const scheduleCropPages = displayPages
     .filter((page) =>
-      page.page_type === 'schedule' ||
-      page.scan_flags?.opening_info ||
-      page.scan_extracts?.opening_schedule_items?.length ||
-      page.scan_extracts?.window_sizes?.length ||
-      page.scan_extracts?.opening_quantity_notes?.length,
+      page.page_type === 'schedule' || openingSchedulePageIndexes.has(page.page_index),
     )
     .map((page) => ({
       pageIndex: page.page_index,
@@ -1147,11 +1280,14 @@ export function TakeoffAnalysisScreen({
     vapor_barrier_reference: 'Vapor / air barrier',
     opening_schedule: 'Opening schedule',
   };
+  const thumbnailCacheScope = documentId ? `document:${documentId}` : `url:${pdfUrl.split('#')[0]?.split('?')[0] ?? pdfUrl}`;
   const renderPageCards = (renderThumbnails: boolean) => (
     <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
       {displayPages.map((page) => (
         <AnalysisPageCard
           key={page.page_index}
+          cacheScope={thumbnailCacheScope}
+          pdfUrl={pdfUrl}
           page={page}
           pending={isClassifying && pageIsPending(page)}
           selectedForPreview={selectedPreviewPage === page.page_index}
@@ -1165,6 +1301,7 @@ export function TakeoffAnalysisScreen({
               prev[pageIndex] === ratio ? prev : { ...prev, [pageIndex]: ratio }
             );
           }}
+          aspectRatio={previewAspectRatios[page.page_index] ?? null}
           onToggleRole={toggleRole}
           onClearRoles={clearRoles}
         />
@@ -1249,10 +1386,7 @@ export function TakeoffAnalysisScreen({
         const selectedPage = displayPages.find((page) => page.page_index === selectedPreviewPage);
         const selectedIsSchedule =
           selectedPage?.page_type === 'schedule' ||
-          selectedPage?.scan_flags?.opening_info ||
-          selectedPage?.scan_extracts?.opening_schedule_items?.length ||
-          selectedPage?.scan_extracts?.window_sizes?.length ||
-          selectedPage?.scan_extracts?.opening_quantity_notes?.length;
+          (selectedPage ? openingSchedulePageIndexes.has(selectedPage.page_index) : false);
         if (selectedIsSchedule) {
           setScheduleCropPageIndex(selectedPreviewPage);
           return;
@@ -1264,7 +1398,7 @@ export function TakeoffAnalysisScreen({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closeExpandedPreview, displayPages, expandedPreviewPage, selectedPreviewPage]);
+  }, [closeExpandedPreview, displayPages, expandedPreviewPage, openingSchedulePageIndexes, selectedPreviewPage]);
 
   const stepOrder = [
     'loading_pdf',
@@ -1289,8 +1423,14 @@ export function TakeoffAnalysisScreen({
   const progressMessage = classificationError
     ? getPublicAnalysisError(classificationError)
     : analysisProgress?.message ?? 'Preparing vision analysis';
-  const showLoadingStatus = isClassifying && !classificationError;
-  const showCompletedReview = classificationDone && !isClassifying && !classificationError;
+  const isReadingOpeningTables =
+    isClassifying &&
+    !classificationError &&
+    analysisProgress?.stage === 'extracting_details' &&
+    /schedule|table|opening/i.test(analysisProgress.message);
+  const showLoadingStatus = isClassifying && !classificationError && !isReadingOpeningTables;
+  const showCompletedReview =
+    classificationDone && !classificationError && (!isClassifying || isReadingOpeningTables);
   const renderedSummary =
     analysisProgress?.totalPages
       ? `${analysisProgress.renderedPages}/${analysisProgress.totalPages}`
@@ -1381,11 +1521,13 @@ export function TakeoffAnalysisScreen({
                   </>
                 </Document>
               ) : (
-                <div className="rounded-[14px] border border-dashed border-[var(--takeoff-line)] bg-white px-4 py-5 text-[12px] text-[var(--takeoff-text-muted)]">
-                  {classificationError
-                    ? `Vision analysis failed: ${progressMessage}`
-                    : 'Page analysis results will appear here as soon as the scan completes.'}
-                </div>
+                classificationError ? (
+                  <div className="rounded-[14px] border border-dashed border-[var(--takeoff-line)] bg-white px-4 py-5 text-[12px] text-[var(--takeoff-text-muted)]">
+                    Vision analysis failed: {progressMessage}
+                  </div>
+                ) : (
+                  <VisionPageSkeletonGrid count={Math.min(6, Math.max(3, effectivePageCount || totalPages || 6))} />
+                )
               )}
             </div>
           </div>
@@ -1538,7 +1680,8 @@ export function TakeoffAnalysisScreen({
 
                 {(openingTagsOnlyPages.length > 0 ||
                   openingUnlabeledPages.length > 0 ||
-                  openingScheduleRows.length > 0) && (
+                  openingScheduleRows.length > 0 ||
+                  isReadingOpeningTables) && (
                   <div className={`${showCompletedReview ? '' : 'mt-3'} rounded-[12px] border border-[var(--takeoff-line)] bg-white px-3 py-3`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -1554,6 +1697,30 @@ export function TakeoffAnalysisScreen({
                         </div>
                       </div>
                     </div>
+                    {isReadingOpeningTables && (
+                      <div className="mt-2 rounded-[10px] border border-[#d8e3d4] bg-[#f4f8f1] px-2.5 py-2">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#47644a]" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[10px] font-medium text-[var(--takeoff-ink)]">
+                              Reading selected tables
+                            </div>
+                            <div className="mt-0.5 text-[9px] leading-4 text-[var(--takeoff-text-muted)]">
+                              {progressMessage}
+                            </div>
+                          </div>
+                          <span className="takeoff-mono text-[9px] text-[var(--takeoff-text-subtle)]">
+                            {progressValue}%
+                          </span>
+                        </div>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
+                          <div
+                            className="h-full rounded-full bg-[#47644a] transition-[width] duration-500"
+                            style={{ width: `${progressValue}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                     <div className="mt-2 flex items-center justify-between gap-2">
                       {openingScheduleSamples.length > 0 ? (
                         <div className="takeoff-mono text-[9px] leading-4 text-[var(--takeoff-text-muted)]">
@@ -1579,7 +1746,7 @@ export function TakeoffAnalysisScreen({
                             className="takeoff-mono inline-flex items-center gap-1 rounded-full border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-[var(--takeoff-ink)] disabled:cursor-wait disabled:text-[var(--takeoff-text-subtle)]"
                           >
                             <Expand className="h-3 w-3" />
-                            Crop
+                            Select
                           </button>
                           {openingCatalogRows.length > 0 && (
                             <button
@@ -1657,12 +1824,34 @@ export function TakeoffAnalysisScreen({
                   )}
                 </div>
                 <button
-                  onClick={() => onContinue(effectiveScores)}
-                  disabled={!classificationDone || Boolean(classificationError) || measurementPages.length === 0}
+                  onClick={async () => {
+                    if (isContinuingToZones) return;
+                    setIsContinuingToZones(true);
+                    try {
+                      await onContinue(effectiveScores);
+                    } finally {
+                      setIsContinuingToZones(false);
+                    }
+                  }}
+                  disabled={
+                    isContinuingToZones ||
+                    !classificationDone ||
+                    Boolean(classificationError) ||
+                    measurementPages.length === 0
+                  }
                   className="flex h-10 w-full items-center justify-center gap-2 rounded-full border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-4 text-[11px] font-semibold text-white transition-colors hover:bg-[#202621] disabled:cursor-not-allowed disabled:border-[var(--takeoff-line)] disabled:bg-[var(--takeoff-paper)] disabled:text-[var(--takeoff-text-subtle)]"
                 >
-                  Continue to Zones
-                  <ChevronRight className="h-4 w-4" />
+                  {isContinuingToZones ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Preparing Areas
+                    </>
+                  ) : (
+                    <>
+                      Continue to Zones
+                      <ChevronRight className="h-4 w-4" />
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -1680,9 +1869,9 @@ export function TakeoffAnalysisScreen({
               : [{ pageIndex: scheduleCropPage.page_index, label: scheduleCropPage.label || `Page ${scheduleCropPage.page_index + 1}` }]
           }
           onCancel={() => setScheduleCropPageIndex(null)}
-          onAnalyzeAll={async (crops) => {
-            await onAnalyzeScheduleCrops(crops.map((item) => ({ pageIndex: item.pageIndex, bbox: item.bbox })));
+          onAnalyzeAll={(crops) => {
             setScheduleCropPageIndex(null);
+            void onAnalyzeScheduleCrops(crops.map((item) => ({ pageIndex: item.pageIndex, bbox: item.bbox })));
           }}
         />
       )}

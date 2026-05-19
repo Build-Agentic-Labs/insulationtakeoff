@@ -36,6 +36,11 @@ parsed = parseOpeningScheduleSize('3/0 x 5/6');
 near(parsed.widthFt, 3, 'slash width parses as feet/inches');
 near(parsed.heightFt, 5.5, 'slash height parses as feet/inches');
 
+parsed = parseOpeningScheduleSize('36in x 80in x 1-3/4in');
+near(parsed.widthFt, 3, 'door width ignores thickness value');
+near(parsed.heightFt, 80 / 12, 'door height ignores thickness value');
+assert.equal(parsed.reviewFlags.length, 0);
+
 parsed = parseOpeningScheduleSize('3050');
 near(parsed.widthFt, 3, 'compact 3050 width parses');
 near(parsed.heightFt, 5, 'compact 3050 height parses');
@@ -96,5 +101,19 @@ assert.equal(preferredRows.length, 1);
 assert.equal(preferredRows[0].rawSize, '24in x 80in');
 near(preferredRows[0].widthFt, 2, 'explicit row width wins over compact misread');
 near(preferredRows[0].heightFt, 80 / 12, 'explicit row height wins over compact misread');
+
+const doorWithThickness = normalizeOpeningScheduleItems([
+  {
+    openingType: 'door',
+    tag: '101-1',
+    rawSize: '36in x 80in x 1-3/4in',
+    reviewFlags: ['missing_dimension_pair'],
+    confidence: 0.9,
+  },
+]);
+assert.equal(doorWithThickness.length, 1);
+near(doorWithThickness[0].widthFt, 3, 'door row width parses with thickness');
+near(doorWithThickness[0].heightFt, 80 / 12, 'door row height parses with thickness');
+assert.equal(doorWithThickness[0].reviewFlags.includes('missing_dimension_pair'), false);
 
 console.log('opening-schedule tests passed');

@@ -13,6 +13,12 @@ import type { PageAnalysis } from '@/lib/types/takeoff-v2';
 
 const COMMON_SCHEDULE_INCH_MIN = 12;
 const COMMON_SCHEDULE_INCH_MAX = 240;
+const DIMENSION_REVIEW_FLAGS = new Set([
+  'missing_dimension',
+  'missing_dimension_pair',
+  'missing_size',
+  'unparsed_dimension',
+]);
 
 export function normalizeOpeningTag(value: string | null | undefined): string | null {
   const cleaned = value
@@ -123,7 +129,8 @@ export function parseOpeningScheduleSize(rawSize: string | null | undefined): {
     };
   }
 
-  const parts = normalized.split(/\s+x\s+/i).filter(Boolean);
+  const sizeParts = normalized.split(/\s+x\s+/i).filter(Boolean);
+  const parts = sizeParts.length > 2 ? sizeParts.slice(0, 2) : sizeParts;
   if (parts.length !== 2) {
     const compact = normalized.match(/^(\d{2})(\d{2})$/);
   if (compact) {
@@ -222,7 +229,9 @@ export function normalizeOpeningScheduleItems(
           (flag): flag is string => typeof flag === 'string' && Boolean(flag.trim()),
         )
       : [];
-    const reviewFlags = Array.from(new Set([...parsed.reviewFlags, ...modelFlags]));
+    const reviewFlags = Array.from(new Set([...parsed.reviewFlags, ...modelFlags])).filter(
+      (flag) => !(widthFt && heightFt && DIMENSION_REVIEW_FLAGS.has(flag)),
+    );
 
     items.push({
       id:

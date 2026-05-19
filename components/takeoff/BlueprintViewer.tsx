@@ -2,6 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
+import { getReactPdfWorkerSrc } from '@/lib/pdf/pdfjs-worker';
 import type { PdfPoint } from '@/lib/types/takeoff';
 import {
   fetchSnapPoints,
@@ -11,7 +12,7 @@ import {
   type SnapPointSet,
 } from '@/lib/pdf/extract-vectors';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = getReactPdfWorkerSrc();
 
 export interface BlueprintViewerHandle {
   cssToPageCoords: (clientX: number, clientY: number) => PdfPoint | null;
@@ -119,6 +120,7 @@ const RASTER_COMMIT_DELAY_MS = 80;
 const RASTER_FADE_DURATION_MS = 160;
 const WORKSPACE_PADDING = 64;
 const VIEWPORT_INSET = 24;
+const BLUEPRINT_LOAD_TIMEOUT_MS = 20000;
 
 function BlueprintLoadingSkeleton() {
   return (
@@ -494,6 +496,17 @@ export const BlueprintViewer = forwardRef<BlueprintViewerHandle, BlueprintViewer
         rasterFadeTimerRef.current = null;
       }
     }, [pageNumber, pdfUrl]);
+
+    useEffect(() => {
+      if (!isLoading) return;
+
+      const timeout = window.setTimeout(() => {
+        setRenderError('Blueprint is taking too long to load. Try changing pages or refreshing.');
+        setIsLoading(false);
+      }, BLUEPRINT_LOAD_TIMEOUT_MS);
+
+      return () => window.clearTimeout(timeout);
+    }, [isLoading, pageNumber, pdfUrl]);
 
     const zoomAtPoint = useCallback((
       clientX: number,

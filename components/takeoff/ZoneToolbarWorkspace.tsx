@@ -436,7 +436,7 @@ function getZoneLabelBase(zoneType: ZoneType, suggestionLabel?: string | null) {
 
   if (normalizedSuggestion.includes('exterior')) return 'Living Area';
   if (normalizedSuggestion.includes('interior')) return 'Living Area';
-  if (normalizedSuggestion.includes('crawl')) return 'Crawlspace Floor';
+  if (normalizedSuggestion.includes('crawl')) return 'Crawlspace / Floor';
   if (normalizedSuggestion.includes('attic')) return 'Attic Ceiling';
   if (normalizedSuggestion.includes('garage')) return 'Garage Shared Wall';
   if (normalizedSuggestion.includes('storage')) return 'Storage Review';
@@ -449,7 +449,7 @@ function getZoneLabelBase(zoneType: ZoneType, suggestionLabel?: string | null) {
     case 'unconditioned_storage':
       return 'Storage Review';
     case 'unconditioned_crawl':
-      return 'Crawlspace Floor';
+      return 'Crawlspace / Floor';
     case 'unconditioned_attic':
       return 'Attic Ceiling';
     default:
@@ -1403,9 +1403,6 @@ export function ZoneToolbarWorkspace({ pdfUrl }: ZoneToolbarWorkspaceProps) {
                             </span>
                           )}
                         </div>
-	                        <div className="mt-0.5 truncate text-[9px] leading-4 text-[var(--takeoff-text-muted)]">
-	                          {zone.evidence[0] ?? 'Starting hint from scanned context'}
-	                        </div>
 	                        <div className="mt-0.5 truncate text-[9px] leading-4 text-[var(--takeoff-text-subtle)]">
 	                          Best page: {bestPageLabel}
 	                        </div>

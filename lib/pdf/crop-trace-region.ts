@@ -4,9 +4,10 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
+import { getLocalPdfWorkerSrc } from '@/lib/pdf/pdfjs-worker';
 import type { Trace } from '@/lib/types/takeoff';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = getLocalPdfWorkerSrc();
 
 interface CropResult {
   imageBase64: string;

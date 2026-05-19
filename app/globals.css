@@ -345,6 +345,11 @@
   .takeoff-blueprint-loading-dots {
     animation: takeoff-blueprint-dots 5.2s linear infinite;
   }
+
+  .takeoff-thumbnail-sheen {
+    transform: translateX(-140%);
+    animation: takeoff-thumbnail-sheen 1.8s ease-in-out infinite;
+  }
 }
 
 /* Scanning animation keyframes */
@@ -441,6 +446,23 @@
   }
   100% {
     background-position: 16px 16px;
+  }
+}
+
+@keyframes takeoff-thumbnail-sheen {
+  0% {
+    transform: translateX(-140%);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.75;
+  }
+  70% {
+    opacity: 0.75;
+  }
+  100% {
+    transform: translateX(260%);
+    opacity: 0;
   }
 }
 

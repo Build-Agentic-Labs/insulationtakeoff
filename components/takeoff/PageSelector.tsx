@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
+import { getReactPdfWorkerSrc } from '@/lib/pdf/pdfjs-worker';
 import {
   AlertTriangle,
   Check,
@@ -21,7 +22,7 @@ import {
 import { getPublicAnalysisError } from '@/lib/takeoff/analysis-errors';
 import type { PageRole, PageScore } from '@/lib/types/takeoff';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = getReactPdfWorkerSrc();
 
 const ROLE_ORDER: PageRole[] = ['measurement', 'evidence'];
 
