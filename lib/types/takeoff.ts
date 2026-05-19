@@ -101,6 +101,8 @@ export interface PageStopFlags {
 export interface PageScanExtracts {
   window_sizes: string[];
   opening_quantity_notes: string[];
+  opening_evidence?: OpeningEvidenceLevel;
+  opening_schedule_items?: OpeningScheduleItem[];
   insulation_types: string[];
   r_values: string[];
   roof_pitches: string[];
@@ -161,6 +163,31 @@ export type OpeningType =
   | 'french_door'
   | 'door_opening';
 
+export type OpeningEvidenceLevel =
+  | 'direct_dimensions'
+  | 'tags_only'
+  | 'unlabeled'
+  | 'no_opening_evidence';
+
+export type OpeningScheduleKind = 'window' | 'door';
+
+export interface OpeningScheduleItem {
+  id?: string;
+  openingType: OpeningScheduleKind;
+  tag: string;
+  tagNormalized: string;
+  room?: string | null;
+  rawSize: string;
+  widthFt: number | null;
+  heightFt: number | null;
+  areaSf: number | null;
+  scheduleType?: string | null;
+  sourcePageIndex?: number;
+  confidence: number;
+  reviewFlags: string[];
+  rawText?: string | null;
+}
+
 export type DoorDesignationNormalized =
   | 'entry'
   | 'swing'
@@ -206,6 +233,14 @@ export interface WindowCatalogItem {
   heightFt: number;
   areaSf: number;
   label: string;
+  tag?: string | null;
+  tagNormalized?: string | null;
+  room?: string | null;
+  rawSize?: string | null;
+  scheduleType?: string | null;
+  confidence?: number;
+  reviewFlags?: string[];
+  source?: 'manual_scan' | 'vision_schedule' | null;
   sourceText?: string | null;
   pageIndex?: number;
   captureCount: number;
@@ -220,6 +255,14 @@ export interface DoorCatalogItem {
   heightFt: number;
   areaSf: number;
   label: string;
+  tag?: string | null;
+  tagNormalized?: string | null;
+  room?: string | null;
+  rawSize?: string | null;
+  scheduleType?: string | null;
+  confidence?: number;
+  reviewFlags?: string[];
+  source?: 'manual_scan' | 'vision_schedule' | null;
   sourceText?: string | null;
   designationRaw?: string | null;
   designationNormalized?: DoorDesignationNormalized | null;

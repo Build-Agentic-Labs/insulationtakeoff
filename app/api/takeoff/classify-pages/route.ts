@@ -4,6 +4,7 @@ import { getAnthropicClient } from '@/lib/ai/claude-client';
 import type { PageScanExtracts, PageScanFlags, PageStopFlags } from '@/lib/types/takeoff';
 import { requireServerCompanyId } from '@/lib/supabase/company-server';
 import { authApiErrorResponse } from '@/lib/supabase/api-errors';
+import { getPublicAnalysisError } from '@/lib/takeoff/analysis-errors';
 import { normalizePageScanExtracts } from '@/lib/takeoff/scan-extracts';
 
 export const maxDuration = 120;
@@ -42,6 +43,7 @@ const DEFAULT_STOP_FLAGS: PageStopFlags = {
 const DEFAULT_SCAN_EXTRACTS: PageScanExtracts = {
   window_sizes: [],
   opening_quantity_notes: [],
+  opening_schedule_items: [],
   insulation_types: [],
   r_values: [],
   roof_pitches: [],
@@ -149,6 +151,21 @@ For EACH page (numbered starting from 1), determine:
 10. **scan_extracts**: attempt to extract explicit takeoff attributes that are VISIBLE on this page:
    - window_sizes: array of opening size strings when visible (examples: "3050", "3068", "2ft-6in x 4ft-0in")
 	   - opening_quantity_notes: array of short notes about repeated openings, counts, or schedule quantity hints when visible
+	   - opening_evidence: for floor plans only, choose one of "direct_dimensions", "tags_only", "unlabeled", or "no_opening_evidence"
+	     - "direct_dimensions" means opening sizes are printed on the plan, like 3050, 3068, 24in x 80in, 2ft-0in x 6ft-8in
+	     - "tags_only" means openings have labels or IDs like 101B, 101.B, W-2, D3, but the plan does not show sizes
+	     - "unlabeled" means window/door openings are visible but neither size nor clear tag can be read
+	     - "no_opening_evidence" means there is no useful visible opening information
+	   - opening_schedule_items: array of visible door/window schedule rows. Use this on schedule/table pages and on detail pages with clear schedule rows. Each row must include:
+	     {
+	       "openingType": "window" or "door",
+	       "tag": exact visible tag such as "101.B", "W-2", or "D3",
+	       "room": visible room name or null,
+	       "rawSize": exact visible size converted to JSON-safe text such as "24in x 80in", "36 x 56", "2ft-0in x 6ft-8in", or "3/0 x 5/6",
+	       "scheduleType": visible type/description such as "FIXED", "CASEMENT", or "SOLID CORE",
+	       "confidence": 0.0-1.0,
+	       "reviewFlags": short flags such as "hard_to_read", "missing_size", "ambiguous_units"
+	     }
 	   - insulation_types: array of explicit insulation material/type mentions (examples: "batt insulation", "open-cell spray foam", "blown cellulose")
 	   - r_values: array of explicit R-value strings (examples: "R-19", "R-38", "R-13 + 5ci")
 	   - roof_pitches: array of explicit roof pitch/slope strings when visible (examples: "7/12", "6:12", "4 in 12")
@@ -169,6 +186,9 @@ Important guidance:
 - Elevations and sections are useful when they provide wall heights, floor-to-floor heights, or unusual-condition details.
 - Details and schedules are useful when they reveal insulation assemblies, opening sizes, or product/spec information.
 - When a door/window schedule or elevation shows explicit opening sizes, try to capture those exact sizes in **scan_extracts.window_sizes** and note repeated types in **scan_extracts.opening_quantity_notes**.
+- When a floor plan uses opening tags without sizes, mark **scan_extracts.opening_evidence** as "tags_only"; that means a matching window/door schedule is required for the opening catalog. Do not treat tags-only as direct dimensions.
+- When a schedule table is visible, extract as many readable rows as possible into **scan_extracts.opening_schedule_items**. Preserve the exact tag and raw size. Do not invent missing rows or guess unreadable dimensions.
+- If a schedule row has no unit marks, keep the raw size exactly (for example "36 x 56") and add "ambiguous_units" to reviewFlags when uncertain.
 	- When a note, section, detail, or schedule shows insulation materials, R-values, roof pitch, vapor barrier, air barrier, or attic venting/baffle requirements, capture them exactly in the matching **scan_extracts** arrays.
 - Electrical, plumbing, and unrelated coordination sheets should usually be "low_value" unless they clearly include takeoff-relevant dimensions or notes.
 - For **has_dimensions** and **scan_flags.dimensions**, only mark true when the page contains geometry the estimator could actually use for takeoff quantities:
@@ -231,6 +251,8 @@ Return ONLY a valid JSON array, one object per page in order:
 	    "scan_extracts": {
 	      "window_sizes": [],
 	      "opening_quantity_notes": [],
+	      "opening_evidence": "no_opening_evidence",
+	      "opening_schedule_items": [],
 	      "insulation_types": ["R-21 batt insulation"],
 	      "r_values": ["R-21"],
 	      "roof_pitches": [],
@@ -281,7 +303,7 @@ export async function POST(request: NextRequest) {
 
     const message = await getAnthropicClient().messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
+      max_tokens: 8192,
       messages: [{ role: 'user', content }],
     });
 
@@ -333,6 +355,7 @@ export async function POST(request: NextRequest) {
         {
           window_sizes: 12,
           opening_quantity_notes: 8,
+          opening_schedule_items: 80,
           insulation_types: 8,
           r_values: 8,
           roof_pitches: 8,
@@ -340,6 +363,12 @@ export async function POST(request: NextRequest) {
           air_barriers: 8,
           baffles_or_venting: 8,
         },
+      );
+      scanExtracts.opening_schedule_items = (scanExtracts.opening_schedule_items ?? []).map(
+        (item) => ({
+          ...item,
+          sourcePageIndex: item.sourcePageIndex ?? (p.page_number ?? i + 1) - 1,
+        }),
       );
 
       if (!hasRValueEvidenceContext(scanFlags, scanExtracts)) {
@@ -374,7 +403,7 @@ export async function POST(request: NextRequest) {
 
     console.error('Page classification error:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error', pages: [] },
+      { error: getPublicAnalysisError(error), pages: [] },
       { status: 500 }
     );
   }

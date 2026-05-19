@@ -1,4 +1,12 @@
 import type { PageScanExtracts } from '@/lib/types/takeoff';
+import { normalizeOpeningScheduleItems } from '@/lib/takeoff/opening-schedule';
+
+const OPENING_EVIDENCE_VALUES = new Set([
+  'direct_dimensions',
+  'tags_only',
+  'unlabeled',
+  'no_opening_evidence',
+]);
 
 function readStringArray(value: unknown, limit?: number) {
   const strings = Array.isArray(value)
@@ -21,11 +29,22 @@ export function normalizePageScanExtracts(
   value: Partial<PageScanExtracts> | null | undefined,
   limits: Partial<Record<keyof PageScanExtracts, number>> = {},
 ): PageScanExtracts {
+  const openingEvidence =
+    typeof value?.opening_evidence === 'string' && OPENING_EVIDENCE_VALUES.has(value.opening_evidence)
+      ? value.opening_evidence
+      : undefined;
+
   return {
     window_sizes: readStringArray(value?.window_sizes, limits.window_sizes),
     opening_quantity_notes: readStringArray(
       value?.opening_quantity_notes,
       limits.opening_quantity_notes,
+    ),
+    opening_evidence: openingEvidence,
+    opening_schedule_items: normalizeOpeningScheduleItems(
+      value?.opening_schedule_items,
+      undefined,
+      limits.opening_schedule_items,
     ),
     insulation_types: readStringArray(value?.insulation_types, limits.insulation_types),
     r_values: readRValueArray(value?.r_values, limits.r_values),

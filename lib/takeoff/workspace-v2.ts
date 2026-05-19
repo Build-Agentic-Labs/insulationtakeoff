@@ -115,7 +115,10 @@ function inferCapabilities(match: PageClassificationLike | undefined, confidence
   const hasOpeningInfo = Boolean(
     scanFlags?.opening_info ||
       scanExtracts?.window_sizes?.length ||
-      scanExtracts?.opening_quantity_notes?.length
+      scanExtracts?.opening_quantity_notes?.length ||
+      scanExtracts?.opening_schedule_items?.length ||
+      scanExtracts?.opening_evidence === 'direct_dimensions' ||
+      scanExtracts?.opening_evidence === 'tags_only'
   );
   const hasWallAssemblyInfo = Boolean(
     scanFlags?.wall_type_legend ||
@@ -191,7 +194,11 @@ function inferCapabilities(match: PageClassificationLike | undefined, confidence
       score: hasOpeningInfo ? high : pageType === 'schedule' ? high : 0.08,
       evidence: hasOpeningInfo
         ? [
-            scanExtracts?.window_sizes?.length
+            scanExtracts?.opening_schedule_items?.length
+              ? `schedule rows: ${scanExtracts.opening_schedule_items.length}`
+              : scanExtracts?.opening_evidence === 'tags_only'
+                ? 'floor plan uses opening tags'
+                : scanExtracts?.window_sizes?.length
               ? `opening sizes: ${scanExtracts.window_sizes.slice(0, 3).join(', ')}`
               : 'opening sizes or schedules detected',
           ]
@@ -672,6 +679,7 @@ export function buildPageAnalysisFromPageScores({
       aiRoles,
       capabilities: inferCapabilities(match, confidence),
       scanFlags: match?.scan_flags,
+      stopFlags: match?.stop_flags,
       scanExtracts: match?.scan_extracts,
       notes: [
         roles.length > 0
@@ -700,6 +708,22 @@ export function buildPageAnalysisFromPageScores({
           : []),
         ...(match?.scan_extracts?.window_sizes?.length
           ? [`Opening sizes: ${match.scan_extracts.window_sizes.join(', ')}`]
+          : []),
+        ...(match?.scan_extracts?.opening_evidence === 'tags_only'
+          ? ['Opening evidence: floor plan uses tags without dimensions']
+          : match?.scan_extracts?.opening_evidence === 'direct_dimensions'
+            ? ['Opening evidence: direct opening dimensions visible']
+            : match?.scan_extracts?.opening_evidence === 'unlabeled'
+              ? ['Opening evidence: visible but unlabeled openings']
+              : []),
+        ...(match?.scan_extracts?.opening_schedule_items?.length
+          ? [
+              `Opening schedule rows: ${match.scan_extracts.opening_schedule_items.length}`,
+              `Opening schedule samples: ${match.scan_extracts.opening_schedule_items
+                .slice(0, 4)
+                .map((item) => item.tagNormalized)
+                .join(', ')}`,
+            ]
           : []),
         ...(match?.scan_extracts?.opening_quantity_notes?.length
           ? match.scan_extracts.opening_quantity_notes.map((note) => `Opening hint: ${note}`)
@@ -765,9 +789,35 @@ export function getEvidenceRequirementStatuses(
   );
   const schedulePages = findPages(
     (page) =>
-      Boolean(page.scanExtracts?.window_sizes?.length || page.scanExtracts?.opening_quantity_notes?.length) ||
+      Boolean(
+        page.scanExtracts?.opening_schedule_items?.length ||
+          page.scanExtracts?.window_sizes?.length ||
+          page.scanExtracts?.opening_quantity_notes?.length
+      ) ||
       (page.pageType === 'schedule' && page.confidence >= 0.7),
   );
+  const directOpeningPlanPages = measurementPages.filter(
+    (page) =>
+      page.scanExtracts?.opening_evidence === 'direct_dimensions' ||
+      Boolean(page.scanExtracts?.window_sizes?.length),
+  );
+  const taggedOpeningPlanPages = measurementPages.filter(
+    (page) => page.scanExtracts?.opening_evidence === 'tags_only',
+  );
+  const unlabeledOpeningPlanPages = measurementPages.filter(
+    (page) =>
+      page.scanExtracts?.opening_evidence === 'unlabeled' ||
+      page.scanExtracts?.opening_evidence === 'no_opening_evidence' ||
+      Boolean(page.stopFlags?.missing_opening_identification),
+  );
+  const scheduleRows = selectedPages.flatMap(
+    (page) => page.scanExtracts?.opening_schedule_items ?? [],
+  );
+  const scheduleRequired = taggedOpeningPlanPages.length > 0;
+  const estimatorReviewRequired =
+    taggedOpeningPlanPages.length === 0 &&
+    directOpeningPlanPages.length === 0 &&
+    unlabeledOpeningPlanPages.length > 0;
 
   return [
     {
@@ -813,9 +863,15 @@ export function getEvidenceRequirementStatuses(
     {
       requirement: 'opening_schedule',
       label: 'Opening schedule',
-      description: 'Recommended for reusable opening types later in the workflow.',
-      severity: 'recommended',
-      satisfied: schedulePages.length > 0,
+      description: scheduleRequired
+        ? 'Required because one or more floor plans use opening tags without dimensions.'
+        : estimatorReviewRequired
+          ? 'Estimator review required because openings are visible without reliable labels or dimensions.'
+          : directOpeningPlanPages.length > 0
+            ? 'Optional support because direct opening dimensions are visible on the plan.'
+            : 'Recommended for reusable opening types later in the workflow.',
+      severity: scheduleRequired || estimatorReviewRequired ? 'required' : 'recommended',
+      satisfied: scheduleRequired || estimatorReviewRequired ? scheduleRows.length > 0 : schedulePages.length > 0,
       pageIndexes: schedulePages,
     },
   ];

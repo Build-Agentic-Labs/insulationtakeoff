@@ -397,6 +397,18 @@
   }
 }
 
+@keyframes takeoff-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(80%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
+}
+
 @keyframes takeoff-ai-card-glow {
   0%, 100% {
     box-shadow: 0 14px 30px rgba(31, 39, 33, 0.08), 0 0 0 rgba(212, 168, 67, 0);

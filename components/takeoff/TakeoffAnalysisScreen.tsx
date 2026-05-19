@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent } from 'react';
 import {
   Check,
   ChevronRight,
@@ -17,6 +18,7 @@ import {
   buildPageAnalysisFromPageScores,
   getEvidenceRequirementStatuses,
 } from '@/lib/takeoff/workspace-v2';
+import { getPublicAnalysisError } from '@/lib/takeoff/analysis-errors';
 import type { PageScore, PageRole } from '@/lib/types/takeoff';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -30,6 +32,22 @@ interface PreviewOriginRect {
   width: number;
   height: number;
 }
+
+interface CropBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface ScheduleCropTarget {
+  id: string;
+  pageIndex: number;
+  pageLabel: string;
+  bbox: CropBox;
+}
+
+type OpeningCatalogRow = NonNullable<NonNullable<PageScore['scan_extracts']>['opening_schedule_items']>[number];
 
 interface TakeoffAnalysisScreenProps {
   pdfUrl: string;
@@ -48,6 +66,9 @@ interface TakeoffAnalysisScreenProps {
     detailPagesTotal: number;
   } | null;
   onRetryScan: () => void;
+  onRetryScheduleScan: () => void;
+  onAnalyzeScheduleCrop: (pageIndex: number, bbox: CropBox) => void;
+  onAnalyzeScheduleCrops: (crops: Array<{ pageIndex: number; bbox: CropBox }>) => void;
   onContinue: (scores: PageScore[]) => void;
 }
 
@@ -139,11 +160,33 @@ function hasExtractedSignals(page: PageScore) {
       page.scan_extracts?.insulation_types?.length ||
       page.scan_extracts?.window_sizes?.length ||
       page.scan_extracts?.opening_quantity_notes?.length ||
+      page.scan_extracts?.opening_schedule_items?.length ||
       page.scan_extracts?.roof_pitches?.length ||
       page.scan_extracts?.vapor_barriers?.length ||
       page.scan_extracts?.air_barriers?.length ||
       page.scan_extracts?.baffles_or_venting?.length ||
       page.scan_extracts?.wall_framing?.length,
+  );
+}
+
+function displayOpeningReviewFlags(flags: string[]) {
+  const labels: Record<string, string> = {
+    unit_inferred_inches: 'Units inferred as inches',
+    ambiguous_units: 'Units need review',
+    ambiguous_no_unit_dimension: 'Units need review',
+    ambiguous_slash_dimension: 'Slash size needs review',
+    unparsed_dimension: 'Size needs review',
+    missing_dimension_pair: 'Missing width or height',
+    missing_size: 'Missing size',
+  };
+
+  return Array.from(
+    new Set(
+      flags
+        .filter((flag) => flag !== 'compact_code_review' && flag !== 'slash_feet_inches')
+        .map((flag) => labels[flag] ?? flag.replace(/_/g, ' '))
+        .filter(Boolean),
+    ),
   );
 }
 
@@ -419,6 +462,432 @@ function ExpandedPagePreview({
   );
 }
 
+function ScheduleCropModal({
+  pdfUrl,
+  pageIndex,
+  pages,
+  onCancel,
+  onAnalyzeAll,
+}: {
+  pdfUrl: string;
+  pageIndex: number;
+  pages: Array<{ pageIndex: number; label: string }>;
+  onCancel: () => void;
+  onAnalyzeAll: (crops: ScheduleCropTarget[]) => void | Promise<void>;
+}) {
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const cropIdCounterRef = useRef(0);
+  const [activePageIndex, setActivePageIndex] = useState(pageIndex);
+  const [crop, setCrop] = useState<CropBox | null>(null);
+  const [savedCrops, setSavedCrops] = useState<ScheduleCropTarget[]>([]);
+  const [cropMode, setCropMode] = useState(true);
+  const [spacePanning, setSpacePanning] = useState(false);
+  const [isParsingCrops, setIsParsingCrops] = useState(false);
+  const activePage = pages.find((page) => page.pageIndex === activePageIndex) ?? {
+    pageIndex: activePageIndex,
+    label: `Page ${activePageIndex + 1}`,
+  };
+  const activePageSavedCrops = savedCrops.filter((item) => item.pageIndex === activePageIndex);
+  const saveCrop = (box: CropBox) => {
+    if (box.width < 4 || box.height < 4) return;
+    cropIdCounterRef.current += 1;
+    setSavedCrops((current) => [
+      ...current,
+      {
+        id: `${activePageIndex}:${cropIdCounterRef.current}`,
+        pageIndex: activePageIndex,
+        pageLabel: activePage.label,
+        bbox: { ...box },
+      },
+    ]);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+      if (event.code === 'Space' && !event.repeat) {
+        setSpacePanning(true);
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') setSpacePanning(false);
+    };
+    const handleBlur = () => setSpacePanning(false);
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [onCancel]);
+
+  const pointForEvent = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100)),
+    };
+  };
+
+  const drawingEnabled = cropMode && !spacePanning;
+
+  return (
+    <div className="fixed inset-0 z-[90] bg-transparent px-5 py-5">
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={isParsingCrops}
+        className="absolute right-7 top-7 z-[2] flex h-8 w-8 items-center justify-center rounded-full border border-[var(--takeoff-line)] bg-white text-[16px] font-semibold leading-none text-[var(--takeoff-ink)] shadow-[0_10px_24px_rgba(0,0,0,0.12)]"
+        aria-label="Close crop window"
+      >
+        ×
+      </button>
+      <div className="mx-auto flex h-full max-w-[1280px] flex-col overflow-hidden rounded-[12px] border border-[rgba(255,255,255,0.16)] bg-white shadow-[0_32px_100px_rgba(0,0,0,0.28)]">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--takeoff-line)] px-4 py-3">
+          <div>
+            <div className="text-[13px] font-medium text-[var(--takeoff-ink)]">Crop opening schedule</div>
+            <div className="mt-0.5 text-[10px] text-[var(--takeoff-text-muted)]">
+              Drag each schedule table to save a crop. Hold Space to pan, then parse all saved crops.
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <select
+              value={activePageIndex}
+              onChange={(event) => {
+                setActivePageIndex(Number(event.target.value));
+                setCrop(null);
+              }}
+              className="h-8 rounded-full border border-[var(--takeoff-line)] bg-white px-3 text-[10px] font-semibold text-[var(--takeoff-ink)]"
+            >
+              {pages.map((page) => (
+                <option key={page.pageIndex} value={page.pageIndex}>
+                  {page.label || `Page ${page.pageIndex + 1}`}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={isParsingCrops}
+              onClick={() => {
+                setCropMode((current) => !current);
+                setCrop(null);
+              }}
+              className={`h-8 rounded-full border px-3 text-[10px] font-semibold ${
+                cropMode
+                  ? 'border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] text-white'
+                  : 'border-[var(--takeoff-line)] bg-white text-[var(--takeoff-ink)]'
+              }`}
+            >
+              {cropMode ? 'Draw crop' : 'Pan / zoom'}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={isParsingCrops}
+              className="h-8 shrink-0 rounded-full border border-[var(--takeoff-line-strong)] bg-white px-3 text-[10px] font-semibold text-[var(--takeoff-ink)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isParsingCrops || savedCrops.length === 0}
+              onClick={() => {
+                setSavedCrops((current) => current.slice(0, -1));
+                setCrop(null);
+              }}
+              className="h-8 rounded-full border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-3 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:border-[var(--takeoff-line)] disabled:bg-[var(--takeoff-paper)] disabled:text-[var(--takeoff-text-subtle)]"
+            >
+              Undo last
+            </button>
+            <button
+              type="button"
+              disabled={isParsingCrops || savedCrops.length === 0}
+              onClick={async () => {
+                if (savedCrops.length === 0) return;
+                setIsParsingCrops(true);
+                try {
+                  await onAnalyzeAll(savedCrops);
+                } finally {
+                  setIsParsingCrops(false);
+                }
+              }}
+              className="h-8 rounded-full border border-[var(--takeoff-ink)] bg-[var(--takeoff-ink)] px-3 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:border-[var(--takeoff-line)] disabled:bg-[var(--takeoff-paper)] disabled:text-[var(--takeoff-text-subtle)]"
+            >
+              {isParsingCrops ? (
+                <>
+                  <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                  Parsing
+                </>
+              ) : (
+                <>Parse {savedCrops.length || ''} crop{savedCrops.length === 1 ? '' : 's'}</>
+              )}
+            </button>
+          </div>
+        </div>
+        {savedCrops.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-[var(--takeoff-line)] bg-[rgba(246,248,242,0.74)] px-4 py-2">
+            <span className="takeoff-mono text-[9px] uppercase tracking-[0.12em] text-[var(--takeoff-text-subtle)]">
+              Saved crops
+            </span>
+            {savedCrops.map((item, index) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSavedCrops((current) => current.filter((cropItem) => cropItem.id !== item.id))}
+                className="takeoff-mono rounded-full border border-[var(--takeoff-line)] bg-white px-2 py-1 text-[8px] font-semibold text-[var(--takeoff-ink)]"
+                title="Click to remove"
+              >
+                {index + 1}. {item.pageLabel}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--takeoff-paper)]">
+          {isParsingCrops && (
+            <div className="pointer-events-none absolute left-1/2 top-4 z-30 w-[min(360px,calc(100%-32px))] -translate-x-1/2 rounded-[14px] border border-[var(--takeoff-line)] bg-white px-4 py-3 shadow-[0_18px_48px_rgba(15,16,17,0.16)]">
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-4 w-4 animate-spin text-[var(--takeoff-ink)]" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-semibold text-[var(--takeoff-ink)]">Parsing schedule crops</div>
+                  <div className="mt-0.5 text-[10px] text-[var(--takeoff-text-muted)]">
+                    Reading {savedCrops.length} selected table{savedCrops.length === 1 ? '' : 's'}.
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--takeoff-paper)]">
+                <div className="h-full w-1/2 animate-[takeoff-progress-slide_1.2s_ease-in-out_infinite] rounded-full bg-[var(--takeoff-ink)]" />
+              </div>
+            </div>
+          )}
+          <BlueprintViewer
+            key={`schedule-crop-viewer-${activePageIndex}`}
+            pdfUrl={pdfUrl}
+            pageNumber={activePageIndex + 1}
+            cursorMode={drawingEnabled ? 'crosshair' : 'default'}
+            viewportInset={0}
+            workspacePadding={0}
+            minScale={0.6}
+          >
+            {() => (
+              <div className="absolute inset-0 select-none">
+                <div
+                  className={`absolute inset-0 z-10 ${drawingEnabled && !isParsingCrops ? 'pointer-events-auto' : 'pointer-events-none'}`}
+                  onPointerDown={(event) => {
+                    if (!drawingEnabled || isParsingCrops) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const point = pointForEvent(event);
+                    dragStartRef.current = point;
+                    setCrop({ x: point.x, y: point.y, width: 0, height: 0 });
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }}
+                  onPointerMove={(event) => {
+                    const start = dragStartRef.current;
+                    if (!drawingEnabled || isParsingCrops || !start) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const point = pointForEvent(event);
+                    setCrop({
+                      x: Math.min(start.x, point.x),
+                      y: Math.min(start.y, point.y),
+                      width: Math.abs(point.x - start.x),
+                      height: Math.abs(point.y - start.y),
+                    });
+                  }}
+                  onPointerUp={(event) => {
+                    if (!drawingEnabled || isParsingCrops) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const start = dragStartRef.current;
+                    const point = pointForEvent(event);
+                    if (start) {
+                      saveCrop({
+                        x: Math.min(start.x, point.x),
+                        y: Math.min(start.y, point.y),
+                        width: Math.abs(point.x - start.x),
+                        height: Math.abs(point.y - start.y),
+                      });
+                    }
+                    dragStartRef.current = null;
+                    setCrop(null);
+                    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    }
+                  }}
+                  onPointerCancel={(event) => {
+                    dragStartRef.current = null;
+                    setCrop(null);
+                    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    }
+                  }}
+                />
+                <svg className="pointer-events-none absolute inset-0 z-20 h-full w-full overflow-visible">
+                  {activePageSavedCrops.map((item) => {
+                    const cropNumber = savedCrops.findIndex((saved) => saved.id === item.id) + 1;
+                    return (
+                      <g key={item.id}>
+                        <rect
+                          x={`${item.bbox.x}%`}
+                          y={`${item.bbox.y}%`}
+                          width={`${item.bbox.width}%`}
+                          height={`${item.bbox.height}%`}
+                          fill="rgba(49,95,58,0.14)"
+                          stroke="#315f3a"
+                          strokeWidth="2"
+                        />
+                        <rect
+                          x={`${item.bbox.x + 0.4}%`}
+                          y={`${item.bbox.y + 0.4}%`}
+                          width="18"
+                          height="14"
+                          rx="7"
+                          fill="#315f3a"
+                        />
+                        <text
+                          x={`${item.bbox.x + 1.3}%`}
+                          y={`${item.bbox.y + 1.9}%`}
+                          fill="white"
+                          fontSize="10"
+                          fontWeight="700"
+                          dominantBaseline="middle"
+                        >
+                          {cropNumber}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  {crop && (
+                    <rect
+                      x={`${crop.x}%`}
+                      y={`${crop.y}%`}
+                      width={`${crop.width}%`}
+                      height={`${crop.height}%`}
+                      fill="rgba(29,78,216,0.14)"
+                      stroke="#1d4ed8"
+                      strokeWidth="2"
+                    />
+                  )}
+                </svg>
+              </div>
+            )}
+          </BlueprintViewer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OpeningCatalogModal({
+  rows,
+  onClose,
+}: {
+  rows: OpeningCatalogRow[];
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onClose();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[90] bg-[rgba(16,22,18,0.22)] px-5 py-5">
+      <div className="mx-auto flex h-full max-w-[1120px] flex-col overflow-hidden rounded-[14px] border border-[rgba(23,33,28,0.14)] bg-white shadow-[0_32px_100px_rgba(0,0,0,0.22)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--takeoff-line)] px-5 py-4">
+          <div>
+            <div className="text-[15px] font-semibold text-[var(--takeoff-ink)]">Opening catalog</div>
+            <div className="mt-1 text-[11px] leading-4 text-[var(--takeoff-text-muted)]">
+              Window and door schedule rows captured from the selected plan sheets.
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="takeoff-mono rounded-full border border-[#c6d0c3] bg-[#edf3ea] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#47644a]">
+              {rows.length} row{rows.length === 1 ? '' : 's'}
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--takeoff-line)] bg-white text-[16px] font-semibold leading-none text-[var(--takeoff-ink)]"
+              aria-label="Close opening catalog"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+        <div className="takeoff-hide-scrollbar min-h-0 flex-1 overflow-auto bg-[var(--takeoff-paper)] p-4">
+          <div className="overflow-hidden rounded-[12px] border border-[var(--takeoff-line)] bg-white">
+            <table className="w-full border-collapse text-left">
+              <thead className="sticky top-0 z-10 bg-[rgba(246,248,242,0.96)]">
+                <tr className="takeoff-mono border-b border-[var(--takeoff-line)] text-[8px] uppercase tracking-[0.14em] text-[var(--takeoff-text-subtle)]">
+                  <th className="px-3 py-2 font-semibold">Tag</th>
+                  <th className="px-3 py-2 font-semibold">Type</th>
+                  <th className="px-3 py-2 font-semibold">Size</th>
+                  <th className="px-3 py-2 font-semibold">Room</th>
+                  <th className="px-3 py-2 font-semibold">Schedule Type</th>
+                  <th className="px-3 py-2 font-semibold">Source</th>
+                  <th className="px-3 py-2 font-semibold">Confidence</th>
+                  <th className="px-3 py-2 font-semibold">Review</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((item) => {
+                  const reviewFlags = displayOpeningReviewFlags(item.reviewFlags);
+                  return (
+                    <tr
+                      key={`${item.openingType}:${item.tagNormalized}:${item.sourcePageIndex ?? 'page'}:${item.rawSize}`}
+                      className="border-b border-[var(--takeoff-line)] last:border-b-0"
+                    >
+                      <td className="takeoff-mono px-3 py-2 text-[11px] font-semibold text-[var(--takeoff-ink)]">
+                        {item.tagNormalized || item.tag}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="takeoff-mono rounded-full border border-[#c6d0c3] bg-[#edf3ea] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-[#47644a]">
+                          {item.openingType}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-[var(--takeoff-ink)]">
+                        {item.rawSize || 'No size read'}
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-[var(--takeoff-text-muted)]">
+                        {item.room || '—'}
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-[var(--takeoff-text-muted)]">
+                        {item.scheduleType || '—'}
+                      </td>
+                      <td className="takeoff-mono px-3 py-2 text-[9px] text-[var(--takeoff-text-subtle)]">
+                        {item.sourcePageIndex !== undefined ? `Page ${item.sourcePageIndex + 1}` : 'Source'}
+                      </td>
+                      <td className="takeoff-mono px-3 py-2 text-[9px] text-[var(--takeoff-text-subtle)]">
+                        {Math.round(item.confidence * 100)}%
+                      </td>
+                      <td className="px-3 py-2 text-[10px] leading-4 text-[var(--takeoff-warning)]">
+                        {reviewFlags.length > 0 ? reviewFlags.join(', ') : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function pageIsPending(page: PageScore) {
   const genericName = (page.label ?? '').trim().toLowerCase() === `page ${page.page_index + 1}`.toLowerCase();
   const hasSignals =
@@ -567,6 +1036,9 @@ export function TakeoffAnalysisScreen({
   classificationError,
   analysisProgress,
   onRetryScan,
+  onRetryScheduleScan,
+  onAnalyzeScheduleCrop,
+  onAnalyzeScheduleCrops,
   onContinue,
 }: TakeoffAnalysisScreenProps) {
   const [localPageScores, setLocalPageScores] = useState<PageScore[]>([]);
@@ -575,6 +1047,8 @@ export function TakeoffAnalysisScreen({
   const [expandedPreviewClosing, setExpandedPreviewClosing] = useState(false);
   const [previewOriginRect, setPreviewOriginRect] = useState<PreviewOriginRect | null>(null);
   const [previewAspectRatios, setPreviewAspectRatios] = useState<Record<number, number>>({});
+  const [openingCatalogModalOpen, setOpeningCatalogModalOpen] = useState(false);
+  const [scheduleCropPageIndex, setScheduleCropPageIndex] = useState<number | null>(null);
   const closePreviewTimeoutRef = useRef<number | null>(null);
 
   const effectivePageCount = totalPages || pageScores.length;
@@ -620,6 +1094,51 @@ export function TakeoffAnalysisScreen({
     Object.values(page.stop_flags ?? {}).some(Boolean)
   );
   const detailExtractPages = effectiveScores.filter(hasExtractedSignals);
+  const openingScheduleRows = pageAnalysis.flatMap(
+    (page) => page.scanExtracts?.opening_schedule_items ?? [],
+  );
+  const openingCatalogRows = [...openingScheduleRows].sort((left, right) => {
+    if (left.openingType !== right.openingType) {
+      return left.openingType === 'window' ? -1 : 1;
+    }
+    return left.tagNormalized.localeCompare(right.tagNormalized, undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    });
+  });
+  const openingTagsOnlyPages = pageAnalysis.filter(
+    (page) => page.roles.includes('measurement') && page.scanExtracts?.opening_evidence === 'tags_only',
+  );
+  const openingUnlabeledPages = pageAnalysis.filter(
+    (page) =>
+      page.roles.includes('measurement') &&
+      (page.scanExtracts?.opening_evidence === 'unlabeled' ||
+        page.scanExtracts?.opening_evidence === 'no_opening_evidence'),
+  );
+  const openingScheduleSamples = openingScheduleRows
+    .slice(0, 5)
+    .map((item) => item.tagNormalized)
+    .filter(Boolean);
+  const scheduleCropPage =
+    scheduleCropPageIndex !== null
+      ? (displayPages.find((page) => page.page_index === scheduleCropPageIndex) ?? null)
+      : null;
+  const scheduleCropPages = displayPages
+    .filter((page) =>
+      page.page_type === 'schedule' ||
+      page.scan_flags?.opening_info ||
+      page.scan_extracts?.opening_schedule_items?.length ||
+      page.scan_extracts?.window_sizes?.length ||
+      page.scan_extracts?.opening_quantity_notes?.length,
+    )
+    .map((page) => ({
+      pageIndex: page.page_index,
+      label: page.label || `Page ${page.page_index + 1}`,
+    }));
+  const firstSchedulePageIndex =
+    pageAnalysis.find((page) => page.pageType === 'schedule')?.pageIndex ??
+    openingScheduleRows.find((row) => row.sourcePageIndex !== undefined)?.sourcePageIndex ??
+    null;
   const displayRequirementLabels: Record<string, string> = {
     measurement_page: 'Primary takeoff page',
     wall_height_reference: 'Sections / elevations',
@@ -727,6 +1246,17 @@ export function TakeoffAnalysisScreen({
 
       if (event.code === 'Space' && selectedPreviewPage !== null && expandedPreviewPage === null) {
         event.preventDefault();
+        const selectedPage = displayPages.find((page) => page.page_index === selectedPreviewPage);
+        const selectedIsSchedule =
+          selectedPage?.page_type === 'schedule' ||
+          selectedPage?.scan_flags?.opening_info ||
+          selectedPage?.scan_extracts?.opening_schedule_items?.length ||
+          selectedPage?.scan_extracts?.window_sizes?.length ||
+          selectedPage?.scan_extracts?.opening_quantity_notes?.length;
+        if (selectedIsSchedule) {
+          setScheduleCropPageIndex(selectedPreviewPage);
+          return;
+        }
         setExpandedPreviewClosing(false);
         setExpandedPreviewPage(selectedPreviewPage);
       }
@@ -734,7 +1264,7 @@ export function TakeoffAnalysisScreen({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closeExpandedPreview, expandedPreviewPage, selectedPreviewPage]);
+  }, [closeExpandedPreview, displayPages, expandedPreviewPage, selectedPreviewPage]);
 
   const stepOrder = [
     'loading_pdf',
@@ -757,7 +1287,7 @@ export function TakeoffAnalysisScreen({
 
   const progressValue = Math.max(0, Math.min(100, analysisProgress?.progress ?? 0));
   const progressMessage = classificationError
-    ? classificationError
+    ? getPublicAnalysisError(classificationError)
     : analysisProgress?.message ?? 'Preparing vision analysis';
   const showLoadingStatus = isClassifying && !classificationError;
   const showCompletedReview = classificationDone && !isClassifying && !classificationError;
@@ -806,17 +1336,15 @@ export function TakeoffAnalysisScreen({
             <span className="rounded-full border border-[var(--takeoff-line)] bg-white px-2 py-1">
               {detailExtractPages.length} details
             </span>
-            {classificationError && (
-              <button
-                type="button"
-                onClick={onRetryScan}
-                disabled={isClassifying}
-                className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[var(--takeoff-line-strong)] bg-white px-2.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--takeoff-ink)] transition-colors hover:border-[#9eb29d] hover:bg-[var(--takeoff-paper)] disabled:cursor-wait disabled:border-[var(--takeoff-line)] disabled:text-[var(--takeoff-text-subtle)]"
-              >
-                <RefreshCw className={`h-3 w-3 ${isClassifying ? 'animate-spin' : ''}`} />
-                {isClassifying ? 'Scanning' : 'Retry scan'}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={onRetryScan}
+              disabled={isClassifying}
+              className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[var(--takeoff-line-strong)] bg-white px-2.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--takeoff-ink)] transition-colors hover:border-[#9eb29d] hover:bg-[var(--takeoff-paper)] disabled:cursor-wait disabled:border-[var(--takeoff-line)] disabled:text-[var(--takeoff-text-subtle)]"
+            >
+              <RefreshCw className={`h-3 w-3 ${isClassifying ? 'animate-spin' : ''}`} />
+              {isClassifying ? 'Scanning' : classificationError ? 'Retry scan' : 'Rerun vision'}
+            </button>
           </div>
         </div>
 
@@ -855,7 +1383,7 @@ export function TakeoffAnalysisScreen({
               ) : (
                 <div className="rounded-[14px] border border-dashed border-[var(--takeoff-line)] bg-white px-4 py-5 text-[12px] text-[var(--takeoff-text-muted)]">
                   {classificationError
-                    ? `Vision analysis failed: ${classificationError}`
+                    ? `Vision analysis failed: ${progressMessage}`
                     : 'Page analysis results will appear here as soon as the scan completes.'}
                 </div>
               )}
@@ -881,7 +1409,7 @@ export function TakeoffAnalysisScreen({
               <div
                 className={
                   showCompletedReview
-                    ? 'flex flex-1 flex-col gap-2.5'
+                    ? 'takeoff-hide-scrollbar min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1'
                     : 'takeoff-hide-scrollbar min-h-0 flex-1 overflow-y-auto pr-1'
                 }
               >
@@ -1008,6 +1536,66 @@ export function TakeoffAnalysisScreen({
                   </div>
                 )}
 
+                {(openingTagsOnlyPages.length > 0 ||
+                  openingUnlabeledPages.length > 0 ||
+                  openingScheduleRows.length > 0) && (
+                  <div className={`${showCompletedReview ? '' : 'mt-3'} rounded-[12px] border border-[var(--takeoff-line)] bg-white px-3 py-3`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-medium text-[var(--takeoff-ink)]">
+                          Opening catalog
+                        </div>
+                        <div className="mt-1 text-[9px] leading-4 text-[var(--takeoff-text-muted)]">
+                          {openingTagsOnlyPages.length > 0
+                            ? 'Floor plan uses opening tags but no dimensions. Window/Door schedule required.'
+                            : openingUnlabeledPages.length > 0
+                              ? 'Openings need estimator review because labels or dimensions were not reliable.'
+                              : 'Opening schedule found.'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      {openingScheduleSamples.length > 0 ? (
+                        <div className="takeoff-mono text-[9px] leading-4 text-[var(--takeoff-text-muted)]">
+                          Sample tags: {openingScheduleSamples.join(', ')}
+                        </div>
+                      ) : (
+                        <div className="takeoff-mono text-[9px] leading-4 text-[var(--takeoff-text-muted)]">
+                          No schedule rows extracted yet.
+                        </div>
+                      )}
+                      {(openingCatalogRows.length > 0 || firstSchedulePageIndex !== null) && (
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (firstSchedulePageIndex !== null) {
+                                setScheduleCropPageIndex(firstSchedulePageIndex);
+                              } else {
+                                onRetryScheduleScan();
+                              }
+                            }}
+                            disabled={isClassifying}
+                            className="takeoff-mono inline-flex items-center gap-1 rounded-full border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-[var(--takeoff-ink)] disabled:cursor-wait disabled:text-[var(--takeoff-text-subtle)]"
+                          >
+                            <Expand className="h-3 w-3" />
+                            Crop
+                          </button>
+                          {openingCatalogRows.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setOpeningCatalogModalOpen(true)}
+                              className="takeoff-mono inline-flex items-center gap-1 rounded-full border border-[var(--takeoff-line)] bg-[var(--takeoff-paper)] px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-[var(--takeoff-ink)]"
+                            >
+                              View
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className={`${showCompletedReview ? '' : 'mt-3'} rounded-[12px] border border-[var(--takeoff-line)] bg-[rgba(246,248,242,0.78)] px-3 py-3`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-[10px] font-medium text-[var(--takeoff-ink)]">
@@ -1054,7 +1642,7 @@ export function TakeoffAnalysisScreen({
                 </div>
               </div>
 
-              <div className="mt-3 border-t border-[var(--takeoff-line)] pt-3">
+              <div className="mt-3 shrink-0 border-t border-[var(--takeoff-line)] pt-3">
                 <div className="mb-2 text-[10px] leading-5 text-[var(--takeoff-text-muted)]">
                   {measurementPages.length === 0 ? (
                     'Assign at least one primary takeoff page before continuing to zones.'
@@ -1082,6 +1670,28 @@ export function TakeoffAnalysisScreen({
         </div>
 
       </div>
+      {scheduleCropPage && (
+        <ScheduleCropModal
+          pdfUrl={pdfUrl}
+          pageIndex={scheduleCropPage.page_index}
+          pages={
+            scheduleCropPages.length > 0
+              ? scheduleCropPages
+              : [{ pageIndex: scheduleCropPage.page_index, label: scheduleCropPage.label || `Page ${scheduleCropPage.page_index + 1}` }]
+          }
+          onCancel={() => setScheduleCropPageIndex(null)}
+          onAnalyzeAll={async (crops) => {
+            await onAnalyzeScheduleCrops(crops.map((item) => ({ pageIndex: item.pageIndex, bbox: item.bbox })));
+            setScheduleCropPageIndex(null);
+          }}
+        />
+      )}
+      {openingCatalogModalOpen && openingCatalogRows.length > 0 && (
+        <OpeningCatalogModal
+          rows={openingCatalogRows}
+          onClose={() => setOpeningCatalogModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

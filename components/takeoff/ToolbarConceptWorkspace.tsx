@@ -41,6 +41,7 @@ import {
   formatRoofPitch,
   parseRoofPitchText,
 } from '@/lib/takeoff/roof-pitch';
+import { findCatalogItemByTag, normalizeOpeningTag } from '@/lib/takeoff/opening-schedule';
 import {
   calibratedLength,
   deriveZoneLifecycleState,
@@ -1056,6 +1057,7 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
   const [roofPitchToolMode, setRoofPitchToolMode] = useState<RoofPitchToolMode>('idle');
   const [windowWidthText, setWindowWidthText] = useState(`5'-0"`);
   const [windowHeightText, setWindowHeightText] = useState(`5'-0"`);
+  const [windowTagText, setWindowTagText] = useState('');
   const [windowSourceText, setWindowSourceText] = useState<string | null>(null);
   const [windowStatus, setWindowStatus] = useState<string | null>(null);
   const [selectedWindowCatalogId, setSelectedWindowCatalogId] = useState<string | null>(null);
@@ -1063,6 +1065,7 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
   const [pendingManualWindowMarkerPoint, setPendingManualWindowMarkerPoint] = useState<PdfPoint | null>(null);
   const [doorWidthText, setDoorWidthText] = useState(`3'-0"`);
   const [doorHeightText, setDoorHeightText] = useState(`6'-8"`);
+  const [doorTagText, setDoorTagText] = useState('');
   const [doorType, setDoorType] = useState<Exclude<OpeningType, 'window'>>('door');
   const [doorSourceText, setDoorSourceText] = useState<string | null>(null);
   const [doorStatus, setDoorStatus] = useState<string | null>(null);
@@ -1522,11 +1525,19 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
   const isDoorToolActive = isDoorCaptureMode || isDoorPlaceMode;
   const isRoofPitchCaptureMode = roofPitchToolMode === 'capture';
   const canResetWindowTool =
-    isWindowToolActive || Boolean(windowSourceText) || Boolean(windowStatus);
+    isWindowToolActive || Boolean(windowSourceText) || Boolean(windowStatus) || Boolean(windowTagText);
   const canResetDoorTool =
-    isDoorToolActive || Boolean(doorSourceText) || Boolean(doorStatus);
+    isDoorToolActive || Boolean(doorSourceText) || Boolean(doorStatus) || Boolean(doorTagText);
   const windowCatalog = useMemo(() => session?.windowCatalog ?? [], [session?.windowCatalog]);
   const doorCatalog = useMemo(() => session?.doorCatalog ?? [], [session?.doorCatalog]);
+  const windowScheduleCatalog = useMemo(
+    () => windowCatalog.filter((item) => item.tagNormalized),
+    [windowCatalog],
+  );
+  const doorScheduleCatalog = useMemo(
+    () => doorCatalog.filter((item) => item.tagNormalized),
+    [doorCatalog],
+  );
   const selectedSurfaceScope = selectedAreaMetrics?.classification?.assemblyScope ?? null;
   const canApplySurfacePresetToSelection =
     Boolean(selectedSurfaceTrace) && selectedSurfaceScope !== activeSurfacePreset.scope;
@@ -2178,6 +2189,8 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
       setOpeningEditTarget(null);
       setWindowStatus(null);
       setDoorStatus(null);
+      setWindowTagText('');
+      setDoorTagText('');
       setRoofPitchStatus(null);
       setWindowSourceText(null);
       setDoorSourceText(null);
@@ -2221,6 +2234,29 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
     setWindowStatus('Drag a box around the printed window size.');
   };
 
+  const handleLookupWindowTag = () => {
+    const normalized = normalizeOpeningTag(windowTagText);
+    if (!normalized) {
+      setWindowStatus('Enter a window tag from the plan or schedule.');
+      return;
+    }
+
+    const match = findCatalogItemByTag(windowCatalog, normalized);
+    if (!match) {
+      setSelectedWindowCatalogId(null);
+      setWindowStatus(`No schedule match for ${normalized}. Scan or enter the window size manually.`);
+      return;
+    }
+
+    setWindowTagText(normalized);
+    setWindowWidthText(formatFeetInches(match.widthFt));
+    setWindowHeightText(formatFeetInches(match.heightFt));
+    setWindowSourceText(match.sourceText ?? match.rawSize ?? match.label);
+    setSelectedWindowCatalogId(match.id);
+    setWindowToolMode('idle');
+    setWindowStatus(`Loaded ${normalized} from schedule. Place it manually on the wall.`);
+  };
+
   const handleStartPlaceWindow = () => {
     if (!windowPreset || !canUseOpeningTools) return;
     setOpeningEditTarget(null);
@@ -2242,6 +2278,7 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
     setPendingManualWindowMarkerPoint(null);
     setWindowToolMode('idle');
     setWindowSourceText(null);
+    setWindowTagText('');
     setWindowStatus(null);
   };
 
@@ -2303,6 +2340,30 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
     setDoorStatus('Drag a box around the printed door size.');
   };
 
+  const handleLookupDoorTag = () => {
+    const normalized = normalizeOpeningTag(doorTagText);
+    if (!normalized) {
+      setDoorStatus('Enter a door tag from the plan or schedule.');
+      return;
+    }
+
+    const match = findCatalogItemByTag(doorCatalog, normalized);
+    if (!match) {
+      setSelectedDoorCatalogId(null);
+      setDoorStatus(`No schedule match for ${normalized}. Scan or enter the door size manually.`);
+      return;
+    }
+
+    setDoorTagText(normalized);
+    setDoorType(match.type);
+    setDoorWidthText(formatFeetInches(match.widthFt));
+    setDoorHeightText(formatFeetInches(match.heightFt));
+    setDoorSourceText(match.sourceText ?? match.rawSize ?? match.label);
+    setSelectedDoorCatalogId(match.id);
+    setDoorToolMode('idle');
+    setDoorStatus(`Loaded ${normalized} from schedule. Place it manually on the wall.`);
+  };
+
   const handleStartPlaceDoor = () => {
     if (!doorPreset || !canUseOpeningTools) return;
     setOpeningEditTarget(null);
@@ -2322,16 +2383,20 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
     setOpeningEditTarget(null);
     setDoorToolMode('idle');
     setDoorSourceText(null);
+    setDoorTagText('');
     setDoorStatus(null);
   };
 
   const handleSaveCurrentWindowToCatalog = () => {
     if (!windowPreset) return;
+    const normalizedTag = normalizeOpeningTag(windowTagText);
 
     const result = upsertWindowCatalogItem({
       widthFt: windowPreset.widthFt,
       heightFt: windowPreset.heightFt,
       label: windowPreset.label,
+      tag: normalizedTag,
+      tagNormalized: normalizedTag,
       sourceText: windowSourceText,
       pageIndex: activePageIndex,
     });
@@ -2363,12 +2428,15 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
 
   const handleSaveCurrentDoorToCatalog = () => {
     if (!doorPreset) return;
+    const normalizedTag = normalizeOpeningTag(doorTagText);
 
     const result = upsertDoorCatalogItem({
       type: doorPreset.type,
       widthFt: doorPreset.widthFt,
       heightFt: doorPreset.heightFt,
       label: doorPreset.label,
+      tag: normalizedTag,
+      tagNormalized: normalizedTag,
       sourceText: doorSourceText,
       pageIndex: activePageIndex,
     });
@@ -3051,6 +3119,25 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
 
               {selectedToolPanel === 'window' && !selectedZone && (
                 <div className="mt-3 space-y-3">
+                  {windowScheduleCatalog.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex gap-2">
+                        <input
+                          value={windowTagText}
+                          onChange={(event) => setWindowTagText(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') handleLookupWindowTag();
+                          }}
+                          placeholder="Window tag"
+                          className={inputClass}
+                        />
+                        <UtilityActionButton label="Find" onClick={handleLookupWindowTag} />
+                      </div>
+                      <div className="takeoff-mono text-[9px] text-[var(--takeoff-text-muted)]">
+                        Schedule tags ready: {windowScheduleCatalog.slice(0, 4).map((item) => item.tagNormalized).join(', ')}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     <input
                       value={windowWidthText}
@@ -3081,6 +3168,25 @@ export function ToolbarConceptWorkspace({ pdfUrl }: ToolbarConceptWorkspaceProps
 
               {selectedToolPanel === 'door' && !selectedZone && (
                 <div className="mt-3 space-y-3">
+                  {doorScheduleCatalog.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex gap-2">
+                        <input
+                          value={doorTagText}
+                          onChange={(event) => setDoorTagText(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') handleLookupDoorTag();
+                          }}
+                          placeholder="Door tag"
+                          className={inputClass}
+                        />
+                        <UtilityActionButton label="Find" onClick={handleLookupDoorTag} />
+                      </div>
+                      <div className="takeoff-mono text-[9px] text-[var(--takeoff-text-muted)]">
+                        Schedule tags ready: {doorScheduleCatalog.slice(0, 4).map((item) => item.tagNormalized).join(', ')}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     <input
                       value={doorWidthText}

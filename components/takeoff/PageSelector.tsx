@@ -18,6 +18,7 @@ import {
   buildPageAnalysisFromPageScores,
   getEvidenceRequirementStatuses,
 } from '@/lib/takeoff/workspace-v2';
+import { getPublicAnalysisError } from '@/lib/takeoff/analysis-errors';
 import type { PageRole, PageScore } from '@/lib/types/takeoff';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -305,6 +306,7 @@ export function PageSelector({
     : mergeLocalScores(effectivePageCount, pageScores, []);
   const selectedPages = effectiveScores.filter((page) => page.roles.length > 0);
   const measurementPages = selectedPages.filter((page) => page.roles.includes('measurement'));
+  const publicClassificationError = classificationError ? getPublicAnalysisError(classificationError) : null;
   const pageAnalysis = buildPageAnalysisFromPageScores({
     totalPages: effectivePageCount,
     pageScores: effectiveScores,
@@ -393,7 +395,7 @@ export function PageSelector({
                   <Loader2 className="h-2.5 w-2.5 animate-spin" />
                   AI analyzing pages...
                 </span>
-              ) : classificationError ? (
+              ) : publicClassificationError ? (
                 <span className="takeoff-mono flex h-7 items-center gap-1 rounded-full border border-[var(--takeoff-warning)]/30 bg-[rgba(212,168,67,0.08)] px-2.5 text-[8px] font-medium text-[var(--takeoff-warning)]">
                   Analysis failed
                 </span>
@@ -423,8 +425,8 @@ export function PageSelector({
                         Confirm page roles before collection starts
                       </div>
                       <div className="mt-1 text-[10px] leading-4 text-[var(--takeoff-text-muted)]">
-                        {classificationError
-                          ? `Vision analysis did not return usable results. ${classificationError}`
+                        {publicClassificationError
+                          ? `Vision analysis did not return usable results. ${publicClassificationError}`
                           : 'Review the scanned pages, keep the primary takeoff pages, and confirm which sheets support evidence, specs, and opening review.'}
                       </div>
                     </div>

@@ -4,6 +4,7 @@ import type {
   OpeningType,
   PageScanExtracts,
   PageScanFlags,
+  PageStopFlags,
   PageRole,
   PdfPoint,
   ZoneCeilingType,
@@ -44,6 +45,7 @@ export interface PageAnalysis {
   capabilities: PageCapabilityScore[];
   notes: string[];
   scanFlags?: PageScanFlags;
+  stopFlags?: PageStopFlags;
   scanExtracts?: PageScanExtracts;
 }
 

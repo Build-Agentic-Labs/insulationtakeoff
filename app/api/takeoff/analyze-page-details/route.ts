@@ -17,6 +17,7 @@ type DetailPageType =
   | 'building_sections'
   | 'general_notes'
   | 'opening_reference'
+  | 'opening_schedule'
   | 'floor_plan_region'
   | 'fragmented_details';
 
@@ -59,7 +60,8 @@ const prompts: Record<FragmentPromptType, string> = {
 
 Only capture insulation information that is explicitly visible. Do not infer R-values or insulation types from generic construction details.
 If a ceiling or attic note contains multiple contextual values, preserve every explicit attic value in the spec text, for example "R=49 at flat ceiling and R=38 at vaults". Do not collapse multiple attic R-values into one or drop the secondary vault/cathedral value.
-For all opening sizes, return JSON-safe size strings like "3050" or "2ft-6in x 6ft-8in". Do not use raw inch quote characters in JSON values.
+For all opening sizes, return JSON-safe size strings like "3050", "24in x 80in", "36 x 56", "3/0 x 5/6", or "2ft-6in x 6ft-8in". Do not use raw inch quote characters in JSON values.
+For window and door schedule rows, preserve the visible tag/type ID exactly, the room when shown, the exact raw size, and the visible type/description. Do not guess unreadable rows.
 
 Return as JSON:
 {
@@ -67,8 +69,8 @@ Return as JSON:
   "ceiling_insulation": {"spec": "string", "r_value": number, "roof_pitch": "string", "baffles_or_venting": "string"},
   "floor_insulation": {"spec": "string", "r_value": number},
   "foundation": {"type": "string", "insulation": "string"},
-  "window_schedule": [{"type_id": "string", "size": "JSON-safe size string", "type_description": "string", "quantity": number}],
-  "door_schedule": [{"type_id": "string", "size": "JSON-safe size string", "type_description": "string", "quantity": number}],
+  "window_schedule": [{"type_id": "string", "room": "string or null", "size": "JSON-safe size string", "type_description": "string", "quantity": number, "confidence": number}],
+  "door_schedule": [{"type_id": "string", "room": "string or null", "size": "JSON-safe size string", "type_description": "string", "quantity": number, "confidence": number}],
   "general_notes": ["string"],
   "energy_code": "string",
   "climate_zone": number
@@ -149,17 +151,49 @@ Extract ONLY opening information that is explicitly visible:
 - repeated quantity hints
 - opening descriptions or schedule labels
 
-Use JSON-safe size strings like "3050" or "2ft-6in x 4ft-0in". Do not use raw inch quote characters in JSON values.
+Use JSON-safe size strings like "3050", "24in x 80in", "36 x 56", "3/0 x 5/6", or "2ft-6in x 4ft-0in". Do not use raw inch quote characters in JSON values.
 Do not guess sizes or quantities that are not clearly shown.
+For schedule tables, read across the same row and pair the tag/type ID with its SIZE column value. Do not use values from another row.
+Do not return a schedule row unless both the tag/type ID and the size are readable. If the tag is readable but the size is not, put a short explanation in opening_notes instead.
+If the table has many repeated rows, preserve each visible row with its own tag and size; do not collapse rows by type.
 
 Return as JSON:
 {
-  "window_schedule": [{"type_id": "string or null", "size": "string or null", "description": "string or null", "quantity": number or null}],
-  "door_schedule": [{"type_id": "string or null", "size": "string or null", "description": "string or null", "quantity": number or null}],
+  "window_schedule": [{"type_id": "string or null", "room": "string or null", "size": "string or null", "description": "string or null", "quantity": number or null, "confidence": number}],
+  "door_schedule": [{"type_id": "string or null", "room": "string or null", "size": "string or null", "description": "string or null", "quantity": number or null, "confidence": number}],
   "opening_notes": ["string"],
   "count_confidence": "high|medium|low"
 }
 Only include values you can actually read.`,
+
+  opening_schedule: `This is a HIGH-RESOLUTION image of a residential blueprint schedule sheet. Your only job is to transcribe WINDOW and DOOR schedule table rows accurately.
+
+Read table columns row-by-row. Common column names include:
+- WINDOW NO., DOOR NO., MARK, TAG, TYPE, ID
+- ROOM
+- SIZE
+- TYPE or DESCRIPTION
+- SASHES, SILL HEIGHT, TEMPERED, REMARKS
+
+Critical rules:
+- The SIZE column is authoritative. For example, if row 101.A has SIZE 24in x 80in, return exactly "24in x 80in" for 101.A.
+- Do NOT convert a schedule size into a compact code. Do NOT return "2040" for a row that says 24in x 80in.
+- Do NOT infer size from tag, type, room, nearby graphics, or another row.
+- Do NOT use values from another row. Each output row must pair the tag with the SIZE on the same horizontal table row.
+- Do NOT return a row unless BOTH tag and size are readable.
+- If a tag is readable but its size is not readable, put a note in opening_notes instead of returning the row.
+- Preserve repeated rows separately when they have different tags.
+- Convert raw inch quote marks to JSON-safe "in" text, for example 24" x 80" becomes "24in x 80in".
+- Preserve no-unit table values exactly, for example "36 x 56".
+
+Return ONLY valid JSON:
+{
+  "window_schedule": [{"type_id": "101.A", "room": "FOYER", "size": "24in x 80in", "description": "FIXED", "quantity": 1, "confidence": 0.0}],
+  "door_schedule": [{"type_id": "D1", "room": "ENTRY", "size": "3ft-0in x 6ft-8in", "description": "string or null", "quantity": 1, "confidence": 0.0}],
+  "opening_notes": ["string"]
+}
+
+Only include values visible in the table.`,
 };
 
 const FRAGMENT_DETECTION_PROMPT = `You are analyzing a residential blueprint page that may contain multiple detail boxes, note boxes, schedules, or section views.
@@ -312,9 +346,14 @@ async function cropImageBase64(imageBase64: string, bbox: BBox) {
 async function analyzeSinglePromptType(
   imageBase64: string,
   pageType: FragmentPromptType,
+  pageText?: string | null,
 ) {
-  const prompt = prompts[pageType];
-  const raw = await callVisionWithImage(imageBase64, prompt, 4096);
+  const textLayer =
+    pageText && pageText.trim()
+      ? `\n\nPDF TEXT LAYER FOR THIS PAGE:\n${pageText.trim().slice(0, 20000)}\n\nWhen the PDF text layer and image disagree, prefer the PDF text layer for exact schedule row text and use the image only to understand table structure.`
+      : '';
+  const prompt = `${prompts[pageType]}${textLayer}`;
+  const raw = await callVisionWithImage(imageBase64, prompt, pageType === 'opening_schedule' ? 8192 : 4096);
   const jsonBlock = extractJsonBlock(raw, 'object');
   if (!jsonBlock) {
     return { data: null, raw };
@@ -593,9 +632,10 @@ export async function POST(request: NextRequest) {
   try {
     await requireServerCompanyId();
     const body = await request.json();
-    const { image_base64, page_type } = body as {
+    const { image_base64, page_type, page_text } = body as {
       image_base64: string;
       page_type: DetailPageType;
+      page_text?: string | null;
     };
 
     if (!image_base64) {
@@ -607,7 +647,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, data: fragmented });
     }
 
-    const analyzed = await analyzeSinglePromptType(image_base64, page_type);
+    const analyzed = await analyzeSinglePromptType(image_base64, page_type, page_text);
     return NextResponse.json({ success: true, data: analyzed.data, raw: analyzed.raw });
   } catch (err) {
     const authResponse = authApiErrorResponse(err);

@@ -42,6 +42,12 @@ import {
   normalizePageScanExtracts,
   uniqueScanStrings,
 } from '@/lib/takeoff/scan-extracts';
+import {
+  buildOpeningCatalogsFromScheduleItems,
+  collectOpeningScheduleItemsFromPageScores,
+  normalizeOpeningScheduleItems,
+} from '@/lib/takeoff/opening-schedule';
+import { getPublicAnalysisError } from '@/lib/takeoff/analysis-errors';
 
 // Classification result from the API
 interface PageClassification {
@@ -100,6 +106,7 @@ function hasMeaningfulClassificationResults(
       Boolean(page.scan_extracts?.insulation_types?.length) ||
       Boolean(page.scan_extracts?.window_sizes?.length) ||
       Boolean(page.scan_extracts?.opening_quantity_notes?.length) ||
+      Boolean(page.scan_extracts?.opening_schedule_items?.length) ||
       Boolean(page.scan_extracts?.roof_pitches?.length) ||
       Boolean(page.scan_extracts?.vapor_barriers?.length) ||
       Boolean(page.scan_extracts?.air_barriers?.length) ||
@@ -146,6 +153,12 @@ interface FragmentedDetailCompiled {
 interface FragmentedDetailResponse {
   compiled?: FragmentedDetailCompiled | null;
   fragments?: Array<unknown>;
+}
+
+interface OpeningReferenceResponse {
+  window_schedule?: Array<Record<string, unknown>>;
+  door_schedule?: Array<Record<string, unknown>>;
+  opening_notes?: Array<Record<string, unknown> | string>;
 }
 
 const DETAIL_ENRICHMENT_PAGE_LIMIT = 6;
@@ -243,6 +256,134 @@ function readScheduleQuantityNotes(input: unknown, label: string) {
 function readOpeningNotes(input: unknown) {
   if (!Array.isArray(input)) return [] as string[];
   return uniqueStrings(input.map((entry) => readStringValue(entry)));
+}
+
+function readOpeningScheduleItems(input: unknown, openingType: 'window' | 'door', sourcePageIndex?: number) {
+  if (!Array.isArray(input)) return [];
+  return normalizeOpeningScheduleItems(
+    input.map((entry) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const row = entry as Record<string, unknown>;
+      return {
+        ...row,
+        openingType,
+        tag: row.tag ?? row.type_id ?? row.window_no ?? row.door_no,
+        rawSize: row.rawSize ?? row.raw_size ?? row.size,
+        scheduleType:
+          row.scheduleType ?? row.schedule_type ?? row.type ?? row.type_description ?? row.description,
+      };
+    }),
+    sourcePageIndex,
+  );
+}
+
+function dedupeOpeningScheduleItems(items: PageScanExtracts['opening_schedule_items']) {
+  return normalizeOpeningScheduleItems(items ?? [], undefined, 160);
+}
+
+function openingReferenceToDetailData(
+  data: OpeningReferenceResponse | null | undefined,
+): FragmentedDetailResponse | null {
+  if (!data) return null;
+  return {
+    compiled: {
+      window_schedule: data.window_schedule ?? [],
+      door_schedule: data.door_schedule ?? [],
+      opening_notes: data.opening_notes ?? [],
+    },
+    fragments: [],
+  };
+}
+
+function shouldRunOpeningSchedulePass(page: PageClassification) {
+  return Boolean(
+    page.page_type === 'schedule' ||
+      page.scan_flags?.opening_info ||
+      page.scan_extracts?.opening_evidence === 'tags_only' ||
+      page.scan_extracts?.opening_schedule_items?.length ||
+      page.scan_extracts?.window_sizes?.length ||
+      page.scan_extracts?.opening_quantity_notes?.length,
+  );
+}
+
+function detailRenderScale(page: PageClassification) {
+  return shouldRunOpeningSchedulePass(page) ? 3.6 : 1.35;
+}
+
+async function extractPdfPageText(page: unknown) {
+  const pageWithText = page as {
+    getTextContent?: () => Promise<{
+      items?: Array<{
+        str?: string;
+        transform?: number[];
+      }>;
+    }>;
+  };
+  if (typeof pageWithText.getTextContent !== 'function') return '';
+
+  try {
+    const content = await pageWithText.getTextContent();
+    const items = (content.items ?? [])
+      .map((item) => ({
+        text: typeof item.str === 'string' ? item.str.trim() : '',
+        x: Array.isArray(item.transform) ? Math.round(item.transform[4] ?? 0) : 0,
+        y: Array.isArray(item.transform) ? Math.round(item.transform[5] ?? 0) : 0,
+      }))
+      .filter((item) => item.text);
+
+    items.sort((a, b) => {
+      if (Math.abs(a.y - b.y) > 3) return b.y - a.y;
+      return a.x - b.x;
+    });
+
+    const lines: string[] = [];
+    let currentY: number | null = null;
+    let currentLine: string[] = [];
+
+    for (const item of items) {
+      if (currentY === null || Math.abs(item.y - currentY) <= 3) {
+        currentLine.push(item.text);
+        currentY = currentY ?? item.y;
+        continue;
+      }
+      lines.push(currentLine.join(' | '));
+      currentLine = [item.text];
+      currentY = item.y;
+    }
+
+    if (currentLine.length > 0) lines.push(currentLine.join(' | '));
+    return lines.join('\n');
+  } catch {
+    return '';
+  }
+}
+
+function mergeWindowCatalogs(
+  existing: TakeoffSession['windowCatalog'] | undefined,
+  incoming: TakeoffSession['windowCatalog'],
+) {
+  const byKey = new Map<string, NonNullable<TakeoffSession['windowCatalog']>[number]>();
+  for (const item of existing ?? []) {
+    byKey.set(item.tagNormalized ?? `${item.widthFt}:${item.heightFt}`, item);
+  }
+  for (const item of incoming ?? []) {
+    byKey.set(item.tagNormalized ?? `${item.widthFt}:${item.heightFt}`, item);
+  }
+  return Array.from(byKey.values());
+}
+
+function mergeDoorCatalogs(
+  existing: TakeoffSession['doorCatalog'] | undefined,
+  incoming: TakeoffSession['doorCatalog'],
+) {
+  const byKey = new Map<string, NonNullable<TakeoffSession['doorCatalog']>[number]>();
+  for (const item of existing ?? []) {
+    byKey.set(item.tagNormalized ?? `${item.type}:${item.widthFt}:${item.heightFt}`, item);
+  }
+  for (const item of incoming ?? []) {
+    byKey.set(item.tagNormalized ?? `${item.type}:${item.widthFt}:${item.heightFt}`, item);
+  }
+  return Array.from(byKey.values());
 }
 
 function extractWallFraming(value: unknown): string[] {
@@ -745,6 +886,10 @@ function mergeFragmentedDetailData(
 ): PageClassification {
   const compiled = detailData?.compiled;
   if (!compiled) return page;
+  const extractedOpeningScheduleItems = [
+    ...readOpeningScheduleItems(compiled.window_schedule, 'window', page.page_index),
+    ...readOpeningScheduleItems(compiled.door_schedule, 'door', page.page_index),
+  ];
 
   const nextExtracts: PageScanExtracts = {
     window_sizes: uniqueStrings([
@@ -756,6 +901,11 @@ function mergeFragmentedDetailData(
       ...readScheduleQuantityNotes(compiled.window_schedule, 'window type'),
       ...readScheduleQuantityNotes(compiled.door_schedule, 'door type'),
       ...readOpeningNotes(compiled.opening_notes),
+    ]),
+    opening_evidence: page.scan_extracts?.opening_evidence,
+    opening_schedule_items: dedupeOpeningScheduleItems([
+      ...(page.scan_extracts?.opening_schedule_items ?? []),
+      ...extractedOpeningScheduleItems,
     ]),
     insulation_types: uniqueStrings([
       ...(page.scan_extracts?.insulation_types ?? []),
@@ -824,6 +974,9 @@ function mergeFragmentedDetailData(
     nextExtracts.window_sizes.length
       ? `Window sizes found: ${summarizeValues(nextExtracts.window_sizes, 3)}.`
       : null,
+    nextExtracts.opening_schedule_items?.length
+      ? `Opening schedule rows found: ${nextExtracts.opening_schedule_items.length}.`
+      : null,
     nextExtracts.opening_quantity_notes.length
       ? `Opening hints: ${summarizeValues(nextExtracts.opening_quantity_notes, 2)}.`
       : null,
@@ -872,6 +1025,7 @@ function mergePageAnalysisTitles(
       capabilities: current.capabilities.length > 0 ? current.capabilities : page.capabilities,
       notes: current.notes.length > 0 ? current.notes : page.notes,
       scanFlags: current.scanFlags ?? page.scanFlags,
+      stopFlags: current.stopFlags ?? page.stopFlags,
       scanExtracts: normalizePageScanExtracts(current.scanExtracts ?? page.scanExtracts),
     };
   });
@@ -975,6 +1129,7 @@ function buildClassificationsFromPageAnalysis(pageAnalysis: PageAnalysis[]): Pag
         ),
       confidence: page.confidence,
       scan_flags: page.scanFlags,
+      stop_flags: page.stopFlags,
       scan_extracts: normalizePageScanExtracts(page.scanExtracts),
       scan_notes: page.notes,
     };
@@ -1354,15 +1509,18 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         for (const candidate of enrichmentCandidates) {
           try {
             const page = await pdf.getPage(candidate.page_index + 1);
-            const viewport = page.getViewport({ scale: 1.35 });
+            const viewport = page.getViewport({ scale: detailRenderScale(candidate) });
             const canvas = document.createElement('canvas');
             canvas.width = viewport.width;
             canvas.height = viewport.height;
             const ctx = canvas.getContext('2d');
             if (ctx) {
+              const pageText = shouldRunOpeningSchedulePass(candidate)
+                ? await extractPdfPageText(page)
+                : '';
               await page.render({ canvasContext: ctx, viewport }).promise;
               const imageBase64 = canvas
-                .toDataURL('image/jpeg', 0.82)
+                .toDataURL('image/jpeg', shouldRunOpeningSchedulePass(candidate) ? 0.94 : 0.82)
                 .replace(/^data:image\/jpeg;base64,/, '');
 
               const detailResponse = await fetch('/api/takeoff/analyze-page-details', {
@@ -1383,6 +1541,31 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
                     : pageResult
                 );
                 setClassifications(results);
+              }
+
+              if (shouldRunOpeningSchedulePass(candidate)) {
+                const openingResponse = await fetch('/api/takeoff/analyze-page-details', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    image_base64: imageBase64,
+                    page_type: 'opening_schedule',
+                    page_text: pageText,
+                  }),
+                });
+
+                if (openingResponse.ok) {
+                  const openingPayload = await openingResponse.json();
+                  const openingDetailData = openingReferenceToDetailData(
+                    (openingPayload?.data ?? null) as OpeningReferenceResponse | null,
+                  );
+                  results = results.map((pageResult) =>
+                    pageResult.page_index === candidate.page_index
+                      ? mergeFragmentedDetailData(pageResult, openingDetailData)
+                      : pageResult
+                  );
+                  setClassifications(results);
+                }
               }
             }
           } catch (detailErr) {
@@ -1440,16 +1623,14 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       } catch {}
     } catch (err) {
       console.error('[TakeoffPage] Page classification failed:', err);
+      const publicError = getPublicAnalysisError(err);
       setClassifications([]);
       setClassificationDone(false);
-      setClassificationError(
-        err instanceof Error ? err.message : 'Vision analysis failed.'
-      );
+      setClassificationError(publicError);
       setAnalysisProgress(
         makeAnalysisProgress({
           stage: 'failed',
-          message:
-            err instanceof Error ? err.message : 'Vision analysis failed.',
+          message: publicError,
           progress: 0,
         })
       );
@@ -1460,7 +1641,7 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
   }, [documentId]);
 
   const handleRetryVisionScan = useCallback(() => {
-    if (!pdfUrl || !documentId || isClassifying || !classificationError) return;
+    if (!pdfUrl || !documentId || isClassifying) return;
 
     classifyStartedRef.current = false;
     setVisionScanRunId((value) => value + 1);
@@ -1469,7 +1650,354 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
     setClassificationError(null);
     setPageScoresStore([]);
     void classifyPages(pdfUrl, { force: true });
-  }, [classificationError, classifyPages, documentId, isClassifying, pdfUrl, setPageScoresStore]);
+  }, [classifyPages, documentId, isClassifying, pdfUrl, setPageScoresStore]);
+
+  const handleRetryScheduleScan = useCallback(async () => {
+    if (!pdfUrl || !documentId || isClassifying || classifications.length === 0) return;
+
+    const candidates = classifications.filter(shouldRunOpeningSchedulePass);
+    if (candidates.length === 0) return;
+
+    setIsClassifying(true);
+    setClassificationError(null);
+    setAnalysisProgress(
+      makeAnalysisProgress({
+        stage: 'extracting_details',
+        message: `Rerunning opening schedule extraction (0/${candidates.length})`,
+        progress: 76,
+        renderedPages: totalPages,
+        totalPages,
+        detailPagesCompleted: 0,
+        detailPagesTotal: candidates.length,
+      }),
+    );
+
+    try {
+      const pdfjs = await import('pdfjs-dist');
+      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      const loadingTask = pdfjs.getDocument(pdfUrl);
+      const pdf = await loadingTask.promise;
+      const numPages = pdf.numPages;
+      let nextResults = classifications;
+
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        const page = await pdf.getPage(candidate.page_index + 1);
+        const pageText = await extractPdfPageText(page);
+        const viewport = page.getViewport({ scale: detailRenderScale(candidate) });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const imageBase64 = canvas
+          .toDataURL('image/jpeg', 0.94)
+          .replace(/^data:image\/jpeg;base64,/, '');
+
+        const response = await fetch('/api/takeoff/analyze-page-details', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_base64: imageBase64,
+            page_type: 'opening_schedule',
+            page_text: pageText,
+          }),
+        });
+
+        if (response.ok) {
+          const payload = await response.json();
+          const openingDetailData = openingReferenceToDetailData(
+            (payload?.data ?? null) as OpeningReferenceResponse | null,
+          );
+          nextResults = nextResults.map((pageResult) => {
+            if (pageResult.page_index !== candidate.page_index) return pageResult;
+            return mergeFragmentedDetailData(pageResult, openingDetailData);
+          });
+          setClassifications(nextResults);
+        }
+
+        setAnalysisProgress(
+          makeAnalysisProgress({
+            stage: 'extracting_details',
+            message: `Rerunning opening schedule extraction (${index + 1}/${candidates.length})`,
+            progress: 76 + Math.round(((index + 1) / candidates.length) * 20),
+            renderedPages: numPages,
+            totalPages: numPages,
+            detailPagesCompleted: index + 1,
+            detailPagesTotal: candidates.length,
+          }),
+        );
+      }
+
+      setClassifications(nextResults);
+      setClassificationDone(true);
+      setAnalysisProgress(
+        makeAnalysisProgress({
+          stage: 'complete',
+          message: 'Opening schedule extraction complete',
+          progress: 100,
+          renderedPages: numPages,
+          totalPages: numPages,
+          detailPagesCompleted: candidates.length,
+          detailPagesTotal: candidates.length,
+        }),
+      );
+
+      try {
+        localStorage.setItem(`takeoff_classify_v8_${documentId}_${numPages}`, JSON.stringify(nextResults));
+      } catch {}
+    } catch (err) {
+      console.error('[TakeoffPage] Schedule extraction failed:', err);
+      const publicError = getPublicAnalysisError(err);
+      setClassificationError(publicError);
+      setAnalysisProgress(
+        makeAnalysisProgress({
+          stage: 'failed',
+          message: publicError,
+          progress: 0,
+        }),
+      );
+    } finally {
+      setIsClassifying(false);
+    }
+  }, [classifications, documentId, isClassifying, pdfUrl, totalPages]);
+
+  const handleAnalyzeScheduleCrop = useCallback(async (
+    pageIndex: number,
+    bbox: { x: number; y: number; width: number; height: number },
+  ) => {
+    if (!pdfUrl || !documentId || isClassifying || classifications.length === 0) return;
+
+    setIsClassifying(true);
+    setClassificationError(null);
+    setAnalysisProgress(
+      makeAnalysisProgress({
+        stage: 'extracting_details',
+        message: `Parsing schedule crop on page ${pageIndex + 1}`,
+        progress: 82,
+        renderedPages: totalPages,
+        totalPages,
+        detailPagesCompleted: 0,
+        detailPagesTotal: 1,
+      }),
+    );
+
+    try {
+      const pdfjs = await import('pdfjs-dist');
+      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      const loadingTask = pdfjs.getDocument(pdfUrl);
+      const pdf = await loadingTask.promise;
+      const page = await pdf.getPage(pageIndex + 1);
+      const pageText = await extractPdfPageText(page);
+      const viewport = page.getViewport({ scale: 4.2 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not prepare schedule crop canvas.');
+
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const sourceX = Math.max(0, Math.round((bbox.x / 100) * canvas.width));
+      const sourceY = Math.max(0, Math.round((bbox.y / 100) * canvas.height));
+      const sourceWidth = Math.max(32, Math.round((bbox.width / 100) * canvas.width));
+      const sourceHeight = Math.max(32, Math.round((bbox.height / 100) * canvas.height));
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = sourceWidth;
+      cropCanvas.height = sourceHeight;
+      const cropCtx = cropCanvas.getContext('2d');
+      if (!cropCtx) throw new Error('Could not prepare cropped schedule image.');
+      cropCtx.drawImage(
+        canvas,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        sourceWidth,
+        sourceHeight,
+      );
+
+      const imageBase64 = cropCanvas
+        .toDataURL('image/jpeg', 0.96)
+        .replace(/^data:image\/jpeg;base64,/, '');
+
+      const response = await fetch('/api/takeoff/analyze-page-details', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_base64: imageBase64,
+          page_type: 'opening_schedule',
+          page_text: pageText,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Schedule crop parsing failed.');
+      const payload = await response.json();
+      const openingDetailData = openingReferenceToDetailData(
+        (payload?.data ?? null) as OpeningReferenceResponse | null,
+      );
+      const nextResults = classifications.map((pageResult) => {
+        if (pageResult.page_index !== pageIndex) return pageResult;
+        return mergeFragmentedDetailData(pageResult, openingDetailData);
+      });
+
+      setClassifications(nextResults);
+      setClassificationDone(true);
+      setAnalysisProgress(
+        makeAnalysisProgress({
+          stage: 'complete',
+          message: 'Schedule crop parsed',
+          progress: 100,
+          renderedPages: pdf.numPages,
+          totalPages: pdf.numPages,
+          detailPagesCompleted: 1,
+          detailPagesTotal: 1,
+        }),
+      );
+
+      try {
+        localStorage.setItem(`takeoff_classify_v8_${documentId}_${pdf.numPages}`, JSON.stringify(nextResults));
+      } catch {}
+    } catch (err) {
+      console.error('[TakeoffPage] Schedule crop parsing failed:', err);
+      const publicError = getPublicAnalysisError(err);
+      setClassificationError(publicError);
+      setAnalysisProgress(
+        makeAnalysisProgress({
+          stage: 'failed',
+          message: publicError,
+          progress: 0,
+        }),
+      );
+    } finally {
+      setIsClassifying(false);
+    }
+  }, [classifications, documentId, isClassifying, pdfUrl, totalPages]);
+
+  const handleAnalyzeScheduleCrops = useCallback(async (
+    crops: Array<{ pageIndex: number; bbox: { x: number; y: number; width: number; height: number } }>,
+  ) => {
+    if (!pdfUrl || !documentId || isClassifying || classifications.length === 0 || crops.length === 0) return;
+
+    setIsClassifying(true);
+    setClassificationError(null);
+    setAnalysisProgress(
+      makeAnalysisProgress({
+        stage: 'extracting_details',
+        message: `Parsing schedule crops (0/${crops.length})`,
+        progress: 82,
+        renderedPages: totalPages,
+        totalPages,
+        detailPagesCompleted: 0,
+        detailPagesTotal: crops.length,
+      }),
+    );
+
+    try {
+      const pdfjs = await import('pdfjs-dist');
+      pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      const loadingTask = pdfjs.getDocument(pdfUrl);
+      const pdf = await loadingTask.promise;
+      let nextResults = classifications;
+
+      for (let index = 0; index < crops.length; index += 1) {
+        const crop = crops[index];
+        const page = await pdf.getPage(crop.pageIndex + 1);
+        const pageText = await extractPdfPageText(page);
+        const viewport = page.getViewport({ scale: 4.2 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Could not prepare schedule crop canvas.');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        const sourceX = Math.max(0, Math.round((crop.bbox.x / 100) * canvas.width));
+        const sourceY = Math.max(0, Math.round((crop.bbox.y / 100) * canvas.height));
+        const sourceWidth = Math.max(32, Math.round((crop.bbox.width / 100) * canvas.width));
+        const sourceHeight = Math.max(32, Math.round((crop.bbox.height / 100) * canvas.height));
+        const cropCanvas = document.createElement('canvas');
+        cropCanvas.width = sourceWidth;
+        cropCanvas.height = sourceHeight;
+        const cropCtx = cropCanvas.getContext('2d');
+        if (!cropCtx) throw new Error('Could not prepare cropped schedule image.');
+        cropCtx.drawImage(canvas, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+
+        const imageBase64 = cropCanvas
+          .toDataURL('image/jpeg', 0.96)
+          .replace(/^data:image\/jpeg;base64,/, '');
+
+        const response = await fetch('/api/takeoff/analyze-page-details', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_base64: imageBase64,
+            page_type: 'opening_schedule',
+            page_text: pageText,
+          }),
+        });
+
+        if (!response.ok) throw new Error('Schedule crop parsing failed.');
+        const payload = await response.json();
+        const openingDetailData = openingReferenceToDetailData(
+          (payload?.data ?? null) as OpeningReferenceResponse | null,
+        );
+
+        nextResults = nextResults.map((pageResult) => {
+          if (pageResult.page_index !== crop.pageIndex) return pageResult;
+          return mergeFragmentedDetailData(pageResult, openingDetailData);
+        });
+        setClassifications(nextResults);
+
+        setAnalysisProgress(
+          makeAnalysisProgress({
+            stage: 'extracting_details',
+            message: `Parsing schedule crops (${index + 1}/${crops.length})`,
+            progress: 82 + Math.round(((index + 1) / crops.length) * 16),
+            renderedPages: pdf.numPages,
+            totalPages: pdf.numPages,
+            detailPagesCompleted: index + 1,
+            detailPagesTotal: crops.length,
+          }),
+        );
+      }
+
+      setClassifications(nextResults);
+      setClassificationDone(true);
+      setAnalysisProgress(
+        makeAnalysisProgress({
+          stage: 'complete',
+          message: 'Schedule crops parsed',
+          progress: 100,
+          renderedPages: pdf.numPages,
+          totalPages: pdf.numPages,
+          detailPagesCompleted: crops.length,
+          detailPagesTotal: crops.length,
+        }),
+      );
+
+      try {
+        localStorage.setItem(`takeoff_classify_v8_${documentId}_${pdf.numPages}`, JSON.stringify(nextResults));
+      } catch {}
+    } catch (err) {
+      console.error('[TakeoffPage] Schedule crop parsing failed:', err);
+      const publicError = getPublicAnalysisError(err);
+      setClassificationError(publicError);
+      setAnalysisProgress(
+        makeAnalysisProgress({
+          stage: 'failed',
+          message: publicError,
+          progress: 0,
+        }),
+      );
+    } finally {
+      setIsClassifying(false);
+    }
+  }, [classifications, documentId, isClassifying, pdfUrl, totalPages]);
 
   useEffect(() => {
     if (isLoading || !pdfUrl || !documentId) return;
@@ -1539,6 +2067,9 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       pageScores: currentPageScores,
     });
     const aiSuggestions = buildInitialAiSuggestionsFromPageAnalysis(pageAnalysis);
+    const openingScheduleCatalogs = buildOpeningCatalogsFromScheduleItems(
+      collectOpeningScheduleItemsFromPageScores(currentPageScores),
+    );
 
     if (session && session.documentId === documentId && session.projectId === projectId) {
       const updatedSession = ensureTakeoffSessionWorkspace({
@@ -1546,6 +2077,14 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         selectedPages: currentSelectedPages,
         pageAnalysis,
         aiSuggestions,
+        windowCatalog:
+          openingScheduleCatalogs.windowCatalog.length > 0
+            ? mergeWindowCatalogs(session.windowCatalog, openingScheduleCatalogs.windowCatalog)
+            : session.windowCatalog,
+        doorCatalog:
+          openingScheduleCatalogs.doorCatalog.length > 0
+            ? mergeDoorCatalogs(session.doorCatalog, openingScheduleCatalogs.doorCatalog)
+            : session.doorCatalog,
         updatedAt: new Date().toISOString(),
       });
 
@@ -1566,6 +2105,8 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
         calibrations: {},
         traces: [],
         classifications: [],
+        windowCatalog: openingScheduleCatalogs.windowCatalog,
+        doorCatalog: openingScheduleCatalogs.doorCatalog,
         pageAnalysis,
         aiSuggestions,
         createdAt: new Date().toISOString(),
@@ -1605,6 +2146,8 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
       calibrations: {},
       traces: [],
       classifications: [],
+      windowCatalog: openingScheduleCatalogs.windowCatalog,
+      doorCatalog: openingScheduleCatalogs.doorCatalog,
       pageAnalysis,
       aiSuggestions,
       createdAt: new Date().toISOString(),
@@ -1902,6 +2445,9 @@ export default function TakeoffPage({ params }: { params: Promise<{ id: string }
               classificationError={classificationError}
               analysisProgress={analysisProgress}
               onRetryScan={handleRetryVisionScan}
+              onRetryScheduleScan={handleRetryScheduleScan}
+              onAnalyzeScheduleCrop={handleAnalyzeScheduleCrop}
+              onAnalyzeScheduleCrops={handleAnalyzeScheduleCrops}
               onContinue={handleConfirmPageSelection}
             />
           </div>

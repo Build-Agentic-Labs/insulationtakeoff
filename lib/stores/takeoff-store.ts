@@ -301,6 +301,14 @@ interface TakeoffState {
     widthFt: number;
     heightFt: number;
     label: string;
+    tag?: string | null;
+    tagNormalized?: string | null;
+    room?: string | null;
+    rawSize?: string | null;
+    scheduleType?: string | null;
+    confidence?: number;
+    reviewFlags?: string[];
+    source?: WindowCatalogItem['source'];
     sourceText?: string | null;
     pageIndex?: number;
   }) => { id: string; isNew: boolean } | null;
@@ -309,6 +317,14 @@ interface TakeoffState {
     widthFt: number;
     heightFt: number;
     label: string;
+    tag?: string | null;
+    tagNormalized?: string | null;
+    room?: string | null;
+    rawSize?: string | null;
+    scheduleType?: string | null;
+    confidence?: number;
+    reviewFlags?: string[];
+    source?: DoorCatalogItem['source'];
     sourceText?: string | null;
     designationRaw?: string | null;
     designationNormalized?: DoorCatalogItem['designationNormalized'];
@@ -419,6 +435,14 @@ function isSameWindowCatalogSize(
   );
 }
 
+function isSameWindowCatalogItem(
+  left: WindowCatalogItem,
+  right: Pick<WindowCatalogItem, 'widthFt' | 'heightFt' | 'tagNormalized'>,
+) {
+  if (left.tagNormalized && right.tagNormalized) return left.tagNormalized === right.tagNormalized;
+  return isSameWindowCatalogSize(left, right);
+}
+
 function isSameDoorCatalogShape(
   left: Pick<DoorCatalogItem, 'type' | 'widthFt' | 'heightFt'>,
   right: Pick<DoorCatalogItem, 'type' | 'widthFt' | 'heightFt'>,
@@ -429,6 +453,14 @@ function isSameDoorCatalogShape(
     Math.abs(left.widthFt - right.widthFt) <= tolerance &&
     Math.abs(left.heightFt - right.heightFt) <= tolerance
   );
+}
+
+function isSameDoorCatalogItem(
+  left: DoorCatalogItem,
+  right: Pick<DoorCatalogItem, 'type' | 'widthFt' | 'heightFt' | 'tagNormalized'>,
+) {
+  if (left.tagNormalized && right.tagNormalized) return left.tagNormalized === right.tagNormalized;
+  return isSameDoorCatalogShape(left, right);
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -1640,7 +1672,7 @@ export const useTakeoffStore = create<TakeoffState>((set, get) => ({
 
       const now = new Date().toISOString();
       const existing = (state.session.windowCatalog ?? []).find((catalogItem) =>
-        isSameWindowCatalogSize(catalogItem, item),
+        isSameWindowCatalogItem(catalogItem, item),
       );
 
       const windowCatalog = existing
@@ -1649,6 +1681,14 @@ export const useTakeoffStore = create<TakeoffState>((set, get) => ({
               ? {
                   ...catalogItem,
                   label: item.label,
+                  tag: item.tag ?? catalogItem.tag ?? null,
+                  tagNormalized: item.tagNormalized ?? catalogItem.tagNormalized ?? null,
+                  room: item.room ?? catalogItem.room ?? null,
+                  rawSize: item.rawSize ?? catalogItem.rawSize ?? null,
+                  scheduleType: item.scheduleType ?? catalogItem.scheduleType ?? null,
+                  confidence: item.confidence ?? catalogItem.confidence,
+                  reviewFlags: item.reviewFlags ?? catalogItem.reviewFlags,
+                  source: item.source ?? catalogItem.source ?? null,
                   sourceText: item.sourceText ?? catalogItem.sourceText ?? null,
                   pageIndex: item.pageIndex ?? catalogItem.pageIndex,
                   captureCount: catalogItem.captureCount + 1,
@@ -1664,6 +1704,14 @@ export const useTakeoffStore = create<TakeoffState>((set, get) => ({
               heightFt: item.heightFt,
               areaSf: item.widthFt * item.heightFt,
               label: item.label,
+              tag: item.tag ?? null,
+              tagNormalized: item.tagNormalized ?? null,
+              room: item.room ?? null,
+              rawSize: item.rawSize ?? null,
+              scheduleType: item.scheduleType ?? null,
+              confidence: item.confidence,
+              reviewFlags: item.reviewFlags,
+              source: item.source ?? null,
               sourceText: item.sourceText ?? null,
               pageIndex: item.pageIndex,
               captureCount: 1,
@@ -1700,7 +1748,7 @@ export const useTakeoffStore = create<TakeoffState>((set, get) => ({
 
       const now = new Date().toISOString();
       const existing = (state.session.doorCatalog ?? []).find((catalogItem) =>
-        isSameDoorCatalogShape(catalogItem, item),
+        isSameDoorCatalogItem(catalogItem, item),
       );
 
       const doorCatalog = existing
@@ -1709,6 +1757,14 @@ export const useTakeoffStore = create<TakeoffState>((set, get) => ({
               ? {
                   ...catalogItem,
                   label: item.label,
+                  tag: item.tag ?? catalogItem.tag ?? null,
+                  tagNormalized: item.tagNormalized ?? catalogItem.tagNormalized ?? null,
+                  room: item.room ?? catalogItem.room ?? null,
+                  rawSize: item.rawSize ?? catalogItem.rawSize ?? null,
+                  scheduleType: item.scheduleType ?? catalogItem.scheduleType ?? null,
+                  confidence: item.confidence ?? catalogItem.confidence,
+                  reviewFlags: item.reviewFlags ?? catalogItem.reviewFlags,
+                  source: item.source ?? catalogItem.source ?? null,
                   sourceText: item.sourceText ?? catalogItem.sourceText ?? null,
                   designationRaw: item.designationRaw ?? catalogItem.designationRaw ?? null,
                   designationNormalized:
@@ -1729,6 +1785,14 @@ export const useTakeoffStore = create<TakeoffState>((set, get) => ({
               heightFt: item.heightFt,
               areaSf: item.widthFt * item.heightFt,
               label: item.label,
+              tag: item.tag ?? null,
+              tagNormalized: item.tagNormalized ?? null,
+              room: item.room ?? null,
+              rawSize: item.rawSize ?? null,
+              scheduleType: item.scheduleType ?? null,
+              confidence: item.confidence,
+              reviewFlags: item.reviewFlags,
+              source: item.source ?? null,
               sourceText: item.sourceText ?? null,
               designationRaw: item.designationRaw ?? null,
               designationNormalized: item.designationNormalized ?? null,
